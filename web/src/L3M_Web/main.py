@@ -4,28 +4,12 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from html import escape
-from typing import AsyncIterator
 
 import aiomysql
 import httpx
 from fastapi import FastAPI, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(case_sensitive=False)
-
-    app_name: str = "Friendly AI Stack"
-    log_level: str = "INFO"
-    db_host: str = "mysql"
-    db_port: int = 3306
-    mysql_database: str = "hello_app"
-    mysql_user: str = "hello_user"
-    mysql_password: str = Field(default="", repr=False)
-    ollama_base_url: str = "http://ollama:11434"
-    ollama_model: str = "gemma3:1b"
+from L3M_Web.config.settings import Settings
 
 
 settings = Settings()
@@ -68,7 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         host=settings.db_host,
         port=settings.db_port,
         user=settings.mysql_user,
-        password=settings.mysql_password,
+        password=settings.mysql_password.get_secret_value(),
         db=settings.mysql_database,
         minsize=1,
         maxsize=5,

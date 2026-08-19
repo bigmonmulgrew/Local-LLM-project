@@ -10,9 +10,7 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: mysql
-      DB_PORT: "3306"
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: "http://ollama:${OLLAMA_PORT:?Set OLLAMA_PORT in .env}"
     ports:
       - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8000}:8000"
     depends_on:
@@ -42,9 +40,7 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: mysql
-      DB_PORT: "3306"
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: "http://ollama:${OLLAMA_PORT:?Set OLLAMA_PORT in .env}"
     depends_on:
       mysql:
         condition: service_healthy
@@ -82,6 +78,17 @@ services:
       start_period: 30s
     networks:
       - backend
+  
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: phpmyadmin
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: "${MYSQL_PORT:-3306}"
+    ports:
+      - "${PHPMYADMIN_PORT:-8080}:80"
+    networks:
+      - backend
 
   ollama:
     container_name: Ollama-L3M
@@ -89,8 +96,9 @@ services:
     restart: unless-stopped
     environment:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:1b}
+      OLLAMA_HOST: "0.0.0.0:${OLLAMA_PORT:?Set OLLAMA_PORT in .env}"
     ports:
-      - "${OLLAMA_BIND_ADDRESS:-127.0.0.1}:${OLLAMA_PORT:-11434}:11434"
+      - "${OLLAMA_BIND_ADDRESS:-127.0.0.1}:${OLLAMA_PORT:?Set OLLAMA_PORT in .env}:${OLLAMA_PORT:?Set OLLAMA_PORT in .env}"
     volumes:
       - ${OLLAMA_MODEL_STORAGE:-./ollama-data}:/root/.ollama
     healthcheck:
