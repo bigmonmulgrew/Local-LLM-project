@@ -189,7 +189,11 @@ main() {
     printf '\n%s\n' '============================================'
     printf '%s\n' '[OK] All environment files processed'
     printf '%s\n' '============================================'
+
+    read -n 1 -s -r -p "Press any key to continue"
 }
+
+
 
 shopt -s nullglob
 main "$@"
