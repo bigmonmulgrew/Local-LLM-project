@@ -23,4 +23,4 @@ RUN groupadd --system app && useradd --system --gid app --home-dir /app app
 WORKDIR /app
 COPY --from=builder --chown=app:app /app /app
 USER app
-CMD ["friendly-ai"]
+CMD ["l3m-ai"]

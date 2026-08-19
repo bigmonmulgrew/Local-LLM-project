@@ -3,14 +3,14 @@ requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [project]
-name = "friendly-ai-placeholder"
+name = "l3m-ai"
 version = "0.1.0"
-description = "Lifecycle-aware placeholder for future Python AI software"
+description = "AI backend for L3M package"
 requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-friendly-ai = "friendly_ai.main:main"
+l3m-ai = "l3m_ai.main:main"
 
 [dependency-groups]
 dev = [
@@ -22,4 +22,4 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.uv.build-backend]
-module-name = "friendly_ai"
+module-name = "l3m_ai"
