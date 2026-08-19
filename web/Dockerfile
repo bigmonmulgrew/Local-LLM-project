@@ -24,4 +24,4 @@ WORKDIR /app
 COPY --from=builder --chown=app:app /app /app
 USER app
 EXPOSE 8000
-CMD ["uvicorn", "hello_web.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+CMD ["uvicorn", "L3M_Web.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

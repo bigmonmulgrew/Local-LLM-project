@@ -3,9 +3,9 @@ requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [project]
-name = "Local-LLM-Web"
+name = "L3M-Web"
 version = "0.1.0"
-description = "Friendly FastAPI hello-world MVP"
+description = "Local AI web application"
 requires-python = ">=3.12"
 dependencies = [
     "aiomysql>=0.3.2,<1",
@@ -26,4 +26,4 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.uv.build-backend]
-module-name = "hello_web"
+module-name = "L3M_Web"

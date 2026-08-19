@@ -318,7 +318,7 @@ wheels = [
 ]
 
 [[package]]
-name = "local-llm-web"
+name = "l3m-web"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
