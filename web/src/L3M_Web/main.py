@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from html import escape
 from typing import AsyncIterator
@@ -61,7 +62,7 @@ async def check_ollama() -> bool:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting %s", settings.app_name)
     app.state.db_pool = await aiomysql.create_pool(
         host=settings.db_host,
