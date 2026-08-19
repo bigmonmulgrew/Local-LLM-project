@@ -10,14 +10,28 @@ import httpx
 from fastapi import FastAPI, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from L3M_Web.config.settings import Settings
+from L3M_Web.config.validate import validate_settings, SettingsValidationError
+from L3M_Web.config.summary import log_settings_summary
+from L3M_Web.config.logging import setup_logging
 
-
+# Settings, import, validate then summarise
+logger = logging.getLogger(__name__)
 settings = Settings()
+
+setup_logging(settings.log_level)
+
+try:
+    validate_settings(settings)
+except SettingsValidationError as e:
+    logger.error("Configuration error: %s", e)
+    raise  
+
 logging.basicConfig(
     level=settings.log_level.upper(),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-logger = logging.getLogger("hello_web")
+
+log_settings_summary(settings)
 
 
 async def check_mysql(app: FastAPI) -> bool:

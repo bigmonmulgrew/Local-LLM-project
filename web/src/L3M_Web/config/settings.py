@@ -1,9 +1,11 @@
-from pydantic import BaseModel, Field, computed_field, SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(case_sensitive=False)
 
+    env: str = Field(default="dev", alias="ENVIRONMENT_TYPE")
+    
     app_name: str = Field(default="L3M", alias="COMPOSE_PROJECT_NAME")
     log_level: str
 
