@@ -2,6 +2,7 @@ name: ${COMPOSE_PROJECT_NAME:-local-llm-project-stack}
 
 services:
   web:
+    container_name: Chat-Web-Server
     build:
       context: ./web
     init: true
@@ -33,6 +34,7 @@ services:
       - backend
 
   ai:
+    container_name: AI-server
     build:
       context: ./ai
     init: true
@@ -58,6 +60,7 @@ services:
       - backend
 
   mysql:
+    container_name: MySQL-Database-Server
     image: mysql:8.4
     restart: unless-stopped
     environment:
@@ -81,6 +84,7 @@ services:
       - backend
 
   ollama:
+    container_name: Ollama-L3M
     image: ollama/ollama:latest
     restart: unless-stopped
     environment:
@@ -88,7 +92,7 @@ services:
     ports:
       - "${OLLAMA_BIND_ADDRESS:-127.0.0.1}:${OLLAMA_PORT:-11434}:11434"
     volumes:
-      - ollama-data:/root/.ollama
+      - ${OLLAMA_MODEL_STORAGE:-./ollama-data}:/root/.ollama
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 10s
