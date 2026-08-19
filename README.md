@@ -1,10 +1,10 @@
-# Local LLM project Docker stack
+# Local LLM (L3M) project Docker stack
 
 The goal of this project is to enable a quick setup of a local LLM wrapping it into a locally hosted web interface allowing for flexible deployment or sharing without requiring installation on every machine.
 
 The project MVP stack includesh:
 
-- a chatbot web chat application
+- An AI chatbot chatbot web application
 - FastAPI to test endpoints;
 - MySQL databse;
 - Ollama with persistent model storage;
