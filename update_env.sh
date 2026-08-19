@@ -11,6 +11,7 @@
 #
 #  - New variables from the sample.env but not in .env will be copied across.
 #  - Changed variables in .env which are not empty will be preserved.
+#  - Comments are preserved.
 #  - Variables are sorted to match the sample.env ordering.
 #  - Variables in .env that don't exist in sample.env are sorted to the end.
 #  - Scrip outpuit highlights any new variables as well as any that don't exist in sample.env
