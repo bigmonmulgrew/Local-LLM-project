@@ -1,27 +1,54 @@
 # Local LLM project Docker stack
 
-A small Linux-friendly MVP stack with:
+The goal of this project is to enable a quick setup of a local LLM wrapping it into a locally hosted web interface allowing for flexible deployment or sharing without requiring installation on every machine.
 
-- a FastAPI “Hello, world” website;
-- a lifecycle-aware Python AI placeholder;
-- MySQL 8.4 LTS;
+The project MVP stack includesh:
+
+- a chatbot web chat application
+- FastAPI to test endpoints;
+- MySQL databse;
 - Ollama with persistent model storage;
 - modern Python packaging through `pyproject.toml`, `uv`, and checked-in lockfiles.
+- a lifecycle-aware Python AI placeholder app;
+- automated setup
 
 ## Requirements
 
-- Linux with Docker Engine and the Docker Compose plugin
+- Docker Engine and the Docker Compose plugin
 - approximately 1 GB of free space before downloading an Ollama model (model sizes vary)
 
-## Start it
+The project was prototyped on Windows 11 using WSL.
+
+## Automated env Update script
+This repo contains a script that will automatically sync sample.env with .env, as well as any other environment files. **Do not use this in production**
+
+- New variables added to .env will be preserved. 
+- Changed variables in .env will be preserved.
+- Variables are sorted to match the sample.env ordering.
+- Variables in .env that don't exist in sample.env are sorted to the end.
+- Scrip log highlights any new variables as well as any that don't exist in sample.env
+- It will scan for and sync any files ending in .env
+
+## Setup instrucitons
+
+1. Copy the sample.env file, you can do this manually or use the bundled update script
+2. Build the stack
+3. Check containers
 
 ```bash
-cp sample.env .env
+./update_env.bat
 # Edit the four MYSQL_* values in .env for anything beyond local development.
 docker compose up --build --detach
 docker compose ps
 ```
+### Shared Ollama
+The sample.env file contains a variable which allows changing the ollama models location. 
 
+By default it is set inside the repository so that large files are not accidentally left behind when the repo is deleted.
+
+Setting this external allows sharing models, these are not deleted when deleting the docker image or the repo which can be useful if using large model
+
+### Test setup
 Open <http://localhost:8000>. The homepage reports whether MySQL and Ollama are reachable.
 
 The AI placeholder stays alive, handles `SIGTERM`/`SIGINT`, and writes `helllo world` once during startup:
@@ -53,7 +80,7 @@ make logs
 | `GET /readyz` | MySQL and Ollama readiness; returns HTTP 503 if either is unavailable |
 | `GET /docs` | Interactive OpenAPI documentation |
 
-MySQL and Ollama bind to `127.0.0.1` by default; only the web service binds to all interfaces. Change the matching `*_BIND_ADDRESS` value in `.env` only if remote access is intentional and protected.
+MySQL and Ollama bind to `127.0.0.1` by default; only the web service binds to all interfaces. Change the matching `*_BIND_ADDRESS` value in `.env` only if you require remote access.
 
 ## Lifecycle and data
 
@@ -92,4 +119,6 @@ docker compose config --quiet
 
 ## Production notes
 
-This is an MVP baseline. Before production use, put the web app behind TLS/reverse proxying, use a secrets manager instead of a checked-in `.env`, pin the Ollama image by version or digest, add backups, and review host/GPU resource limits. Do not commit `.env`; it is ignored by Git.
+This is an MVP teamplate project. It is not intended for production use without significant extension.
+
+Do not commit `.env`; it is ignored by Git.
