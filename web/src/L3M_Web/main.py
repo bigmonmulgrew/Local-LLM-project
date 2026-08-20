@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+
+import aiomysql
+import httpx
+
+from L3M_Web.infrastructure.database import is_mysql_ready
+from L3M_Web.infrastructure.ollama import is_ollama_ready
+from L3M_Web.lifespan import create_lifespan
 
 from pathlib import Path
 from fastapi.templating import Jinja2Templates
 
-import aiomysql
-import httpx
 from fastapi import FastAPI, Request, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -44,62 +47,21 @@ logging.basicConfig(
 log_settings_summary(settings)
 
 
-async def check_mysql(app: FastAPI) -> bool:
-    pool: aiomysql.Pool | None = getattr(app.state, "db_pool", None)
-    if pool is None:
-        return False
-    try:
-        async with pool.acquire() as connection:
-            async with connection.cursor() as cursor:
-                await cursor.execute("SELECT 1")
-                row = await cursor.fetchone()
-        return row == (1,)
-    except Exception:
-        logger.warning("MySQL readiness check failed", exc_info=True)
-        return False
-
-
-async def check_ollama() -> bool:
-    try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            response = await client.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags")
-        return response.is_success
-    except httpx.HTTPError:
-        logger.warning("Ollama readiness check failed", exc_info=True)
-        return False
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    logger.info("Starting %s", settings.app_name)
-    app.state.db_pool = await aiomysql.create_pool(
-        host=settings.db_host,
-        port=settings.db_port,
-        user=settings.mysql_user,
-        password=settings.mysql_password.get_secret_value(),
-        db=settings.mysql_database,
-        minsize=1,
-        maxsize=5,
-        autocommit=True,
-        connect_timeout=10,
-    )
-    logger.info("MySQL connection pool is ready")
-    try:
-        yield
-    finally:
-        logger.info("Stopping %s", settings.app_name)
-        app.state.db_pool.close()
-        await app.state.db_pool.wait_closed()
-        logger.info("MySQL connection pool closed")
-
-
-app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title=settings.app_name,
+    version="0.1.0",
+    lifespan=create_lifespan(settings),
+)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request) -> HTMLResponse:
-    mysql_ready = await check_mysql(request.app)
-    ollama_ready = await check_ollama()
+    mysql_ready = await is_mysql_ready(
+        get_db_pool(request.app),
+    )
+    ollama_ready = await is_ollama_ready(
+        get_ollama_client(request.app),
+    )
 
     return templates.TemplateResponse(
         request=request,
@@ -127,11 +89,27 @@ async def healthz() -> dict[str, str]:
 @app.get("/readyz")
 async def readyz(request: Request) -> JSONResponse:
     checks = {
-        "mysql": await check_mysql(request.app),
-        "ollama": await check_ollama(),
+        "mysql": await is_mysql_ready(get_db_pool(request.app)),
+        "ollama": await is_ollama_ready(get_ollama_client(request.app))
     }
+
     ready = all(checks.values())
+
     return JSONResponse(
-        status_code=status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE,
-        content={"status": "ready" if ready else "not ready", "checks": checks},
+        status_code=(
+            status.HTTP_200_OK
+            if ready
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        ),
+        content={
+            "status": "ready" if ready else "not ready",
+            "checks": checks,
+        },
     )
+
+def get_db_pool(app: FastAPI) -> aiomysql.Pool | None:
+    return getattr(app.state, "db_pool", None)
+
+
+def get_ollama_client(app: FastAPI) -> httpx.AsyncClient | None:
+    return getattr(app.state, "ollama_client", None)
