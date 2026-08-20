@@ -16,6 +16,7 @@ dependencies = [
     "pydantic-settings>=2.10,<3",
     "python-multipart>=0.0.32",
     "rich>=15.0.0",
+    "sqlalchemy>=2.0.52",
     "uvicorn[standard]>=0.35,<1",
 ]
 
