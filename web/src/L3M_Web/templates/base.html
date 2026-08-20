@@ -9,10 +9,10 @@
 </head>
 
 <body>
+    <main id="page">
+        {% block content %}{% endblock %}
+    </main>
 
-<main id="page">
-    {% block content %}{% endblock %}
-</main>
-
+    {% block scripts %}{% endblock %}
 </body>
 </html>

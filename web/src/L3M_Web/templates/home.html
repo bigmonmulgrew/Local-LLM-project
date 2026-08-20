@@ -1,25 +1,82 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h1>Hello, world!</h1>
-    <p>Your friendly Python, MySQL, and Ollama MVP is up and running.</p>
-
-    <div class="grid">
-        <div class="card">
-            Web API
-            <span class="ok">Ready</span>
-        </div>
-    
-        <div class="card">
-            MySQL
-            <span class="{{ mysql.css_class }}">{{ mysql.label }}</span>
+<div class="chat-app" data-chat-app>
+    <aside class="sidebar" aria-label="Chat navigation">
+        <div class="brand">
+            <div class="brand-mark" aria-hidden="true">L3</div>
+            <div>
+                <strong>L3M Chat</strong>
+                <span>Local workspace</span>
+            </div>
         </div>
 
-        <div class="card">
-            Ollama
-            <span class="{{ ollama.css_class }}">{{ ollama.label }}</span>
+        <label class="field-label" for="username">User</label>
+        <div class="username-field">
+            <span aria-hidden="true">@</span>
+            <input id="username" name="username" type="text" maxlength="48"
+                   autocomplete="username" placeholder="Enter your name">
         </div>
-    </div>
 
-    <p>Configured model: <code>{{ ollama_model }}</code> · Try the <a href="/docs">API docs</a>.</p>
+        <button class="new-chat-button" type="button" data-new-chat>
+            <span aria-hidden="true">+</span>
+            New chat
+        </button>
+
+        <div class="chat-list-heading">
+            <span>Conversations</span>
+            <span class="chat-count" data-chat-count>0</span>
+        </div>
+        <nav class="chat-list" data-chat-list aria-label="Conversations"></nav>
+
+        <div class="sidebar-footer" data-api-status-wrap data-state="connecting">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span data-api-status>Connecting…</span>
+        </div>
+    </aside>
+
+    <section class="conversation" aria-label="Current conversation">
+        <header class="conversation-header">
+            <button class="mobile-menu-button" type="button" data-menu-button
+                    aria-label="Open chat list" aria-expanded="false">☰</button>
+            <div>
+                <h1 data-chat-title>New conversation</h1>
+                <p data-chat-meta>Start a conversation below</p>
+            </div>
+            <span class="model-badge">{{ ollama_model or "Local model" }}</span>
+        </header>
+
+        <div class="messages" data-messages aria-live="polite" aria-label="Conversation history"></div>
+
+        <div class="composer-wrap">
+            <div class="attachment-list" data-attachment-list aria-live="polite"></div>
+            <form class="composer" data-composer>
+                <label class="sr-only" for="message-input">Message</label>
+                <textarea id="message-input" name="message" rows="1"
+                          placeholder="Message L3M…" data-message-input></textarea>
+
+                <div class="composer-actions">
+                    <div class="composer-tools">
+                        <input class="sr-only" id="file-input" type="file" multiple data-file-input>
+                        <label class="icon-button" for="file-input" title="Attach files" aria-label="Attach files">
+                            <span aria-hidden="true">＋</span>
+                        </label>
+                        <span class="format-hint"><kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</span>
+                    </div>
+                    <button class="send-button" type="submit" aria-label="Send message" data-send-button>
+                        <span>Send</span>
+                        <span aria-hidden="true">↑</span>
+                    </button>
+                </div>
+            </form>
+            <p class="composer-note">Supports **bold**, `inline code`, fenced code blocks, and &gt; quotes.</p>
+        </div>
+    </section>
+
+    <button class="sidebar-scrim" type="button" data-sidebar-scrim aria-label="Close chat list"></button>
+</div>
 {% endblock %}
+
+{% block scripts %}
+        <script src="/static/js/chat.js" defer></script>
+    {% endblock %}

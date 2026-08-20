@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from L3M_Web.api.routes.chat import router as chat_router
 from L3M_Web.api.routes.health import router as health_router
 from L3M_Web.api.routes.home import router as home_router
 from L3M_Web.config.logging import setup_logging
@@ -55,5 +56,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(home_router)
     app.include_router(health_router)
+    app.include_router(chat_router)
 
     return app
