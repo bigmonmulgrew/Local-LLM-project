@@ -290,6 +290,7 @@
             body.append("role", "user");
             body.append("text", content);
             pendingFiles.forEach((file) => body.append("files", file, file.name));
+            setApiStatus("connecting", "Ollama is responding…");
             await apiRequest(`/api/chats/${encodeURIComponent(activeChat.id)}/messages`, {
                 method: "POST",
                 body

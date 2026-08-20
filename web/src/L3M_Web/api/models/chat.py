@@ -50,3 +50,8 @@ class CreateChatRequest(BaseModel):
 class RenameChatRequest(BaseModel):
     user: str = Field(min_length=1, max_length=48)
     title: str = Field(min_length=1, max_length=80)
+
+
+class SendMessageResponse(BaseModel):
+    message: Message
+    generated_response: Message | None = None

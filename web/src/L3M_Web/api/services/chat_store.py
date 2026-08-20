@@ -166,5 +166,37 @@ class PlaceholderChatStore:
             chat.updated_at = message.created_at
             return deepcopy(message)
 
+    async def add_exchange(
+        self,
+        user: str,
+        chat_id: str,
+        user_content: str,
+        attachments: list[FileObject],
+        assistant_content: str,
+    ) -> tuple[Message, Message] | None:
+        """Atomically append one user message and its generated reply."""
+        async with self._lock:
+            chats = self._seed_user(user)
+            chat = next((item for item in chats if item.id == chat_id), None)
+            if chat is None:
+                return None
+
+            user_message = Message(
+                id=str(uuid4()),
+                role="user",
+                content=user_content.strip(),
+                attachments=attachments,
+                created_at=utc_now(),
+            )
+            assistant_message = Message(
+                id=str(uuid4()),
+                role="assistant",
+                content=assistant_content.strip(),
+                created_at=utc_now(),
+            )
+            chat.messages.extend((user_message, assistant_message))
+            chat.updated_at = assistant_message.created_at
+            return deepcopy(user_message), deepcopy(assistant_message)
+
 
 chat_store = PlaceholderChatStore()
