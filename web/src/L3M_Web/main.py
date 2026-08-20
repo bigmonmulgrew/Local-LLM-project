@@ -3,16 +3,26 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from html import escape
+
+from pathlib import Path
+from fastapi.templating import Jinja2Templates
 
 import aiomysql
 import httpx
 from fastapi import FastAPI, Request, status
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from L3M_Web.config.settings import Settings
 from L3M_Web.config.validate import validate_settings, SettingsValidationError
 from L3M_Web.config.summary import log_settings_summary
 from L3M_Web.config.logging import setup_logging
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
+templates = Jinja2Templates(
+    directory=BASE_DIR / "templates",
+)
 
 # Settings, import, validate then summarise
 logger = logging.getLogger(__name__)
@@ -84,55 +94,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
-
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request) -> HTMLResponse:
     mysql_ready = await check_mysql(request.app)
     ollama_ready = await check_ollama()
-    mysql_state = "Ready" if mysql_ready else "Unavailable"
-    ollama_state = "Ready" if ollama_ready else "Unavailable"
-    mysql_class = "ok" if mysql_ready else "warn"
-    ollama_class = "ok" if ollama_ready else "warn"
-    title = escape(settings.app_name)
-    model = escape(settings.ollama_model)
-    return HTMLResponse(
-        f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{title}</title>
-  <style>
-    :root {{ color-scheme: light dark; font-family: ui-rounded, system-ui, sans-serif; }}
-    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f3f7ff; color: #172554; }}
-    main {{ width: min(680px, calc(100% - 3rem)); padding: 3rem; border-radius: 24px; background: white; box-shadow: 0 18px 50px #1d4ed822; }}
-    h1 {{ margin: 0 0 .6rem; font-size: clamp(2.2rem, 8vw, 4.5rem); letter-spacing: -.06em; }}
-    p {{ line-height: 1.6; color: #475569; }}
-    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-top: 2rem; }}
-    .card {{ padding: 1rem 1.2rem; border: 1px solid #dbeafe; border-radius: 14px; background: #f8fbff; }}
-    .card span {{ display: block; margin-top: .35rem; font-weight: 700; }}
-    .ok {{ color: #15803d; }} .warn {{ color: #b45309; }}
-    code {{ color: #1d4ed8; }}
-    @media (prefers-color-scheme: dark) {{
-      body {{ background: #0f172a; color: #e0e7ff; }} main {{ background: #172554; }}
-      p {{ color: #cbd5e1; }} .card {{ border-color: #334155; background: #1e293b; }} code {{ color: #93c5fd; }}
-    }}
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Hello, world! 👋</h1>
-    <p>Your friendly Python, MySQL, and Ollama MVP is up and running.</p>
-    <div class="grid">
-      <div class="card">Web API<span class="ok">Ready</span></div>
-      <div class="card">MySQL<span class="{mysql_class}">{mysql_state}</span></div>
-      <div class="card">Ollama<span class="{ollama_class}">{ollama_state}</span></div>
-    </div>
-    <p>Configured model: <code>{model}</code> · Try the <a href="/docs">API docs</a>.</p>
-  </main>
-</body>
-</html>"""
+
+    return templates.TemplateResponse(
+        request=request,
+        name="home.html",
+        context={
+            "app_name": settings.app_name,
+            "ollama_model": settings.ollama_model,
+            "mysql": {
+                "label": "Ready" if mysql_ready else "Unavailable",
+                "css_class": "ok" if mysql_ready else "warn",
+            },
+            "ollama": {
+                "label": "Ready" if ollama_ready else "Unavailable",
+                "css_class": "ok" if ollama_ready else "warn",
+            },
+        },
     )
 
 
