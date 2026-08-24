@@ -1,3 +1,11 @@
+/**
+ * Chat application entry point.
+ *
+ * This module assembles the API, controller and view, then translates browser
+ * events into application actions. Domain workflows and rendering live in
+ * their dedicated modules.
+ */
+
 import { createChatApi } from "./chat/api.js";
 import { createChatController } from "./chat/controller.js";
 import { createChatView } from "./chat/view.js";
@@ -18,7 +26,7 @@ const api = createChatApi();
         onStatusChange: view.renderStatus
     });
 
-    async function submitMessage() {
+    async function submitCurrentDraft() {
         const result = await controller.submitDraft(elements.messageInput.value);
         if (!result.sent) return;
 
@@ -28,7 +36,7 @@ const api = createChatApi();
         view.focusMessageInput();
     }
 
-    async function showNewChat() {
+    async function openNewChat() {
         if (!await controller.showNewChat()) return;
         view.clearFileInput();
         view.focusMessageInput();
@@ -51,83 +59,136 @@ const api = createChatApi();
         await controller.renameChat(chatId, cleanTitle.slice(0, 80));
     }
 
-    elements.usernameInput.addEventListener("input", () => {
+    async function selectChatAndCloseSidebar(chatId) {
+        if (await controller.selectChat(chatId)) view.closeSidebar();
+    }
+
+    function closestEventTarget(event, selector) {
+        if (typeof event.target?.closest !== "function") return null;
+        return event.target.closest(selector);
+    }
+
+    function handleUsernameInput() {
         controller.updateUsernameInput(elements.usernameInput.value);
-    });
-    elements.usernameInput.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-            event.preventDefault();
-            controller.resolveUsername();
-        }
-    });
-    elements.usernameInput.addEventListener("blur", () => {
-        controller.resolveUsername();
-    });
-    elements.newChatButton.addEventListener("click", showNewChat);
-    elements.chatList.addEventListener("click", (event) => {
-        const renameButton = event.target.closest("[data-rename-chat]");
+    }
+
+    function handleUsernameKeydown(event) {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        void controller.resolveUsername();
+    }
+
+    function handleUsernameBlur() {
+        void controller.resolveUsername();
+    }
+
+    function handleNewChatClick() {
+        void openNewChat();
+    }
+
+    function handleChatListClick(event) {
+        const renameButton = closestEventTarget(event, "[data-rename-chat]");
         if (renameButton) {
             event.stopPropagation();
-            requestChatRename(renameButton.dataset.renameChat);
+            void requestChatRename(renameButton.dataset.renameChat);
             return;
         }
 
-        const deleteButton = event.target.closest("[data-delete-chat]");
+        const deleteButton = closestEventTarget(event, "[data-delete-chat]");
         if (deleteButton) {
             event.stopPropagation();
-            controller.deleteChat(deleteButton.dataset.deleteChat);
+            void controller.deleteChat(deleteButton.dataset.deleteChat);
             return;
         }
 
-        const item = event.target.closest("[data-chat-id]");
+        const item = closestEventTarget(event, "[data-chat-id]");
         if (item) {
-            controller.selectChat(item.dataset.chatId).then((selected) => {
-                if (selected) view.closeSidebar();
-            });
+            void selectChatAndCloseSidebar(item.dataset.chatId);
         }
-    });
-    elements.chatList.addEventListener("keydown", (event) => {
-        if (
-            (event.key === "Enter" || event.key === " ")
-            && event.target.matches("[data-chat-id]")
-        ) {
-            event.preventDefault();
-            controller.selectChat(event.target.dataset.chatId).then((selected) => {
-                if (selected) view.closeSidebar();
-            });
-        }
-    });
-    elements.composer.addEventListener("submit", (event) => {
+    }
+
+    function handleChatListKeydown(event) {
+        const isActivationKey = event.key === "Enter" || event.key === " ";
+        const isChatItem = typeof event.target?.matches === "function"
+            && event.target.matches("[data-chat-id]");
+        if (!isActivationKey || !isChatItem) return;
+
         event.preventDefault();
-        submitMessage();
-    });
-    elements.messageInput.addEventListener("input", () => {
+        void selectChatAndCloseSidebar(event.target.dataset.chatId);
+    }
+
+    function handleComposerSubmit(event) {
+        event.preventDefault();
+        void submitCurrentDraft();
+    }
+
+    function handleMessageInput() {
         view.updateComposer(controller.getState());
-    });
-    elements.messageInput.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            submitMessage();
-        }
-    });
-    elements.fileInput.addEventListener("change", () => {
+    }
+
+    function handleMessageKeydown(event) {
+        if (event.key !== "Enter" || event.shiftKey) return;
+        event.preventDefault();
+        void submitCurrentDraft();
+    }
+
+    function handleFileSelection() {
         controller.addDraftAttachments(elements.fileInput.files);
-    });
-    elements.attachmentList.addEventListener("click", (event) => {
-        const button = event.target.closest("[data-remove-file]");
+    }
+
+    function handleAttachmentListClick(event) {
+        const button = closestEventTarget(event, "[data-remove-file]");
         if (!button) return;
         controller.removeDraftAttachment(Number(button.dataset.removeFile));
-    });
-    elements.menuButton.addEventListener("click", view.toggleSidebar);
-    elements.sidebarScrim.addEventListener("click", view.closeSidebar);
-    window.addEventListener("beforeunload", controller.dispose);
-
-    const initialState = controller.getState();
-    view.setUsernameInput(initialState.usernameInput);
-    view.render(initialState);
-    if (initialState.usernameInput.trim()) {
-        controller.resolveUsername();
-    } else {
-        view.renderStatus("connecting", "Enter a username");
     }
+
+    function handleMenuButtonClick() {
+        view.toggleSidebar();
+    }
+
+    function handleSidebarScrimClick() {
+        view.closeSidebar();
+    }
+
+    function handleBeforeUnload() {
+        controller.dispose();
+    }
+
+    function bindEvents() {
+        elements.usernameInput.addEventListener("input", handleUsernameInput);
+        elements.usernameInput.addEventListener("keydown", handleUsernameKeydown);
+        elements.usernameInput.addEventListener("blur", handleUsernameBlur);
+        elements.newChatButton.addEventListener("click", handleNewChatClick);
+        elements.chatList.addEventListener("click", handleChatListClick);
+        elements.chatList.addEventListener("keydown", handleChatListKeydown);
+        elements.composer.addEventListener("submit", handleComposerSubmit);
+        elements.messageInput.addEventListener("input", handleMessageInput);
+        elements.messageInput.addEventListener("keydown", handleMessageKeydown);
+        elements.fileInput.addEventListener("change", handleFileSelection);
+        elements.attachmentList.addEventListener(
+            "click",
+            handleAttachmentListClick
+        );
+        elements.menuButton.addEventListener("click", handleMenuButtonClick);
+        elements.sidebarScrim.addEventListener(
+            "click",
+            handleSidebarScrimClick
+        );
+        window.addEventListener("beforeunload", handleBeforeUnload);
+    }
+
+    function initializeApplication() {
+        bindEvents();
+        const initialState = controller.getState();
+        view.setUsernameInput(initialState.usernameInput);
+        view.render(initialState);
+
+        if (initialState.usernameInput.trim()) {
+            void controller.resolveUsername();
+        } else {
+            view.renderStatus("connecting", "Enter a username");
+        }
+    }
+
+    initializeApplication();
 })();
