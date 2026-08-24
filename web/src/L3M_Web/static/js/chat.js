@@ -1,3 +1,11 @@
+import {
+    escapeHtml,
+    formatBytes,
+    formatMessage,
+    relativeDate,
+    shortTime
+} from "./chat/formatting.js";
+
 (() => {
     "use strict";
 
@@ -81,84 +89,6 @@
     function invalidateChatRequests() {
         chatListRequestVersion += 1;
         chatSelectionRequestVersion += 1;
-    }
-
-    function escapeHtml(value) {
-        const node = document.createElement("div");
-        node.textContent = String(value ?? "");
-        return node.innerHTML;
-    }
-
-    function inlineFormat(text) {
-        return escapeHtml(text)
-            .replace(/`([^`]+)`/g, "<code>$1</code>")
-            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-            .replace(/\*([^*]+)\*/g, "<em>$1</em>");
-    }
-
-    function formatMessage(source) {
-        const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
-        const output = [];
-        let paragraph = [];
-        let quote = [];
-        let code = [];
-        let language = "code";
-        let inCode = false;
-        const flushParagraph = () => {
-            if (paragraph.length) output.push(`<p>${paragraph.map(inlineFormat).join("<br>")}</p>`);
-            paragraph = [];
-        };
-        const flushQuote = () => {
-            if (quote.length) output.push(`<blockquote>${quote.map(inlineFormat).join("<br>")}</blockquote>`);
-            quote = [];
-        };
-
-        lines.forEach((line) => {
-            if (line.startsWith("```")) {
-                if (inCode) {
-                    output.push(`<pre data-language="${escapeHtml(language)}"><code>${escapeHtml(code.join("\n"))}</code></pre>`);
-                    code = [];
-                    inCode = false;
-                } else {
-                    flushParagraph();
-                    flushQuote();
-                    language = line.slice(3).trim() || "code";
-                    inCode = true;
-                }
-                return;
-            }
-            if (inCode) code.push(line);
-            else if (line.startsWith("> ")) {
-                flushParagraph();
-                quote.push(line.slice(2));
-            } else {
-                flushQuote();
-                if (line.trim()) paragraph.push(line);
-                else flushParagraph();
-            }
-        });
-
-        if (inCode) output.push(`<pre data-language="${escapeHtml(language)}"><code>${escapeHtml(code.join("\n"))}</code></pre>`);
-        flushQuote();
-        flushParagraph();
-        return output.join("");
-    }
-
-    function shortTime(iso) {
-        return new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
-    }
-
-    function relativeDate(iso) {
-        const date = new Date(iso);
-        const today = new Date();
-        if (date.toDateString() === today.toDateString()) return `Today, ${shortTime(iso)}`;
-        return new Intl.DateTimeFormat([], { month: "short", day: "numeric" }).format(date);
-    }
-
-    function formatBytes(bytes) {
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     }
 
     function renderChatList() {

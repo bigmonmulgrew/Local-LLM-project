@@ -78,5 +78,8 @@
 {% endblock %}
 
 {% block scripts %}
-        <script src="/static/js/chat.js" defer></script>
-    {% endblock %}
+    <script
+    type="module"
+    src="{{ url_for('static', path='js/chat.js') }}"
+></script>
+{% endblock %}
