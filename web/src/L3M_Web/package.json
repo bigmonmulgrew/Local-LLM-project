@@ -1,0 +1,11 @@
+{
+  "name": "l3m-web-frontend-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:frontend": "node --test tests/frontend/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
