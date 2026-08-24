@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, func
-from sqlalchemy.dialects.mysql import BIGINT, MEDIUMTEXT
+from sqlalchemy import ForeignKey, Index, String, func
+from sqlalchemy.dialects.mysql import BIGINT, DATETIME, MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from L3M_Web.database.base import Base
@@ -26,12 +26,12 @@ class UserModel(Base):
         index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(),
+        DATETIME(fsp=6),
         nullable=False,
         server_default=func.now(),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(),
+        DATETIME(fsp=6),
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
@@ -57,12 +57,12 @@ class ChatModel(Base):
     )
     title: Mapped[str] = mapped_column(String(80), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(),
+        DATETIME(fsp=6),
         nullable=False,
         server_default=func.now(),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(),
+        DATETIME(fsp=6),
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
@@ -73,7 +73,7 @@ class ChatModel(Base):
         back_populates="chat",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        order_by=lambda: (MessageModel.created_at, MessageModel.id),
+        order_by=lambda: (MessageModel.created_at),
     )
 
 
@@ -91,7 +91,7 @@ class MessageModel(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(MEDIUMTEXT(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(),
+        DATETIME(fsp=6),
         nullable=False,
         server_default=func.now(),
     )
@@ -101,7 +101,7 @@ class MessageModel(Base):
         back_populates="message",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        order_by=lambda: (MessageFileModel.created_at, MessageFileModel.id),
+        order_by=lambda: (MessageFileModel.created_at),
     )
 
 
@@ -120,7 +120,7 @@ class MessageFileModel(Base):
     content_type: Mapped[str] = mapped_column(String(255), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BIGINT(unsigned=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(),
+        DATETIME(fsp=6),
         nullable=False,
         server_default=func.now(),
     )
