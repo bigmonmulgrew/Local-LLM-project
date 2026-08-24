@@ -1,3 +1,4 @@
+import { createChatApi } from "./chat/api.js";
 import {
     escapeHtml,
     formatBytes,
@@ -5,6 +6,8 @@ import {
     relativeDate,
     shortTime
 } from "./chat/formatting.js";
+
+const api = createChatApi();
 
 (() => {
     "use strict";
@@ -51,39 +54,6 @@ import {
     function setApiStatus(state, message) {
         elements.apiStatusWrap.dataset.state = state;
         elements.apiStatus.textContent = message;
-    }
-
-    async function readApiError(response) {
-        const contentType = response.headers.get("content-type") || "";
-
-        if (contentType.includes("application/json")) {
-            const body = await response.json().catch(() => null);
-            if (typeof body?.detail === "string") return body.detail;
-            if (body?.detail != null) return JSON.stringify(body.detail);
-            if (body != null) return JSON.stringify(body);
-        } else {
-            const body = await response.text().catch(() => "");
-            if (body.trim()) return body.trim();
-        }
-
-        return `Request failed with status ${response.status}`;
-    }
-
-    async function apiRequest(path, options = {}) {
-        const headers = options.body instanceof FormData
-            ? options.headers
-            : { "Content-Type": "application/json", ...options.headers };
-        const response = await fetch(path, { ...options, headers });
-
-        if (!response.ok) {
-            const detail = await readApiError(response);
-            throw new Error(`${options.method || "GET"} ${path}: ${detail}`);
-        }
-        return response.status === 204 ? null : response.json();
-    }
-
-    function userQuery(userId = confirmedUser?.id) {
-        return new URLSearchParams({ user_id: userId }).toString();
     }
 
     function invalidateChatRequests() {
@@ -161,7 +131,7 @@ import {
         if (!preserveActive) activeChat = null;
         setApiStatus("connecting", "Loading chats…");
         try {
-            const loadedChats = await apiRequest(`/api/chats?${userQuery(userId)}`);
+            const loadedChats = await api.listChats(userId);
             if (
                 requestVersion !== chatListRequestVersion
                 || confirmedUser?.id !== userId
@@ -191,9 +161,7 @@ import {
         const requestVersion = ++chatSelectionRequestVersion;
         try {
             setApiStatus("connecting", "Loading conversation…");
-            const loadedChat = await apiRequest(
-                `/api/chats/${encodeURIComponent(chatId)}?${userQuery(userId)}`
-            );
+            const loadedChat = await api.getChat(userId, chatId);
             if (
                 requestVersion !== chatSelectionRequestVersion
                 || confirmedUser?.id !== userId
@@ -216,13 +184,6 @@ import {
         }
     }
 
-    async function createChat(userId, title) {
-        return apiRequest("/api/chats", {
-            method: "POST",
-            body: JSON.stringify({ user_id: userId, title })
-        });
-    }
-
     async function renameChat(chatId) {
         const userId = confirmedUser?.id;
         if (!userId) return;
@@ -236,10 +197,11 @@ import {
             return;
         }
         try {
-            const updated = await apiRequest(`/api/chats/${encodeURIComponent(chatId)}`, {
-                method: "PATCH",
-                body: JSON.stringify({ user_id: userId, title: cleanTitle.slice(0, 80) })
-            });
+            const updated = await api.renameChat(
+                userId,
+                chatId,
+                cleanTitle.slice(0, 80)
+            );
             if (confirmedUser?.id !== userId) return;
             if (activeChat?.id === updated.id) activeChat = updated;
             await loadChats({ preserveActive: true });
@@ -253,10 +215,7 @@ import {
         const userId = confirmedUser?.id;
         if (!userId) return;
         try {
-            await apiRequest(
-                `/api/chats/${encodeURIComponent(chatId)}?${userQuery(userId)}`,
-                { method: "DELETE" }
-            );
+            await api.deleteChat(userId, chatId);
             if (confirmedUser?.id !== userId) return;
             if (activeChat?.id === chatId) activeChat = null;
             await loadChats({ preserveActive: true });
@@ -282,20 +241,15 @@ import {
             let targetChat = activeChat;
             if (!targetChat) {
                 const title = content.replace(/[`*_>#]/g, "").slice(0, 42) || "New conversation";
-                targetChat = await createChat(user.id, title);
+                targetChat = await api.createChat(user.id, title);
                 if (confirmedUser?.id === user.id) activeChat = targetChat;
             }
 
             const targetChatId = targetChat.id;
-            const body = new FormData();
-            body.append("user_id", user.id);
-            body.append("role", "user");
-            body.append("text", content);
-            submittedFiles.forEach((file) => body.append("files", file, file.name));
             setApiStatus("connecting", "Ollama is responding…");
-            await apiRequest(`/api/chats/${encodeURIComponent(targetChatId)}/messages`, {
-                method: "POST",
-                body
+            await api.sendMessage(user.id, targetChatId, {
+                text: content,
+                files: submittedFiles
             });
 
             // Preserve edits made while the submitted draft was in flight.
@@ -306,8 +260,8 @@ import {
             try {
                 const listRequestVersion = ++chatListRequestVersion;
                 const [updatedChat, updatedChats] = await Promise.all([
-                    apiRequest(`/api/chats/${encodeURIComponent(targetChatId)}?${userQuery(user.id)}`),
-                    apiRequest(`/api/chats?${userQuery(user.id)}`)
+                    api.getChat(user.id, targetChatId),
+                    api.listChats(user.id)
                 ]);
 
                 if (
@@ -383,10 +337,7 @@ import {
         setApiStatus("connecting", "Confirming username…");
         const promise = (async () => {
             try {
-                const user = await apiRequest("/api/users/resolve", {
-                    method: "POST",
-                    body: JSON.stringify({ username })
-                });
+                const user = await api.resolveUser(username);
                 if (
                     revision !== usernameRevision
                     || elements.username.value.trim() !== username
