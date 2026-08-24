@@ -2,51 +2,74 @@ from __future__ import annotations
 
 import logging
 
-import aiomysql
+from sqlalchemy import URL, text
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from L3M_Web.config.settings import Settings
+from L3M_Web.database.base import Base
 
 logger = logging.getLogger(__name__)
 
-async def create_pool(settings: Settings) -> aiomysql.Pool:
-    logger.info("Creating MySQL connection pool")
+AsyncSessionFactory = async_sessionmaker[AsyncSession]
 
-    pool = await aiomysql.create_pool(
+
+def create_database_url(settings: Settings) -> URL:
+    return URL.create(
+        drivername="mysql+aiomysql",
+        username=settings.mysql_user,
+        password=settings.mysql_password.get_secret_value(),
         host=settings.db_host,
         port=settings.db_port,
-        user=settings.mysql_user,
-        password=settings.mysql_password.get_secret_value(),
-        db=settings.mysql_database,
-        minsize=1,
-        maxsize=5,
-        autocommit=True,
-        connect_timeout=10,
+        database=settings.mysql_database,
     )
 
-    logger.info("MySQL connection pool is ready")
-    return pool
+
+def create_database_engine(settings: Settings) -> AsyncEngine:
+    logger.info("Creating SQLAlchemy async engine")
+    return create_async_engine(
+        create_database_url(settings),
+        pool_size=5,
+        max_overflow=5,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+    )
 
 
-async def close_pool(pool: aiomysql.Pool) -> None:
-    logger.info("Closing MySQL connection pool")
+def create_session_factory(engine: AsyncEngine) -> AsyncSessionFactory:
+    return async_sessionmaker(
+        bind=engine,
+        expire_on_commit=False,
+        autoflush=False,
+    )
 
-    pool.close()
-    await pool.wait_closed()
 
-    logger.info("MySQL connection pool closed")
+async def create_tables(engine: AsyncEngine) -> None:
+    # Importing the model module registers every mapped table on Base.metadata.
+    from L3M_Web.database import models  # noqa: F401
+
+    logger.info("Creating missing database tables")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    logger.info("Database tables are ready")
 
 
-async def is_mysql_ready(pool: aiomysql.Pool | None) -> bool:
-    if pool is None:
+async def close_database_engine(engine: AsyncEngine) -> None:
+    logger.info("Disposing SQLAlchemy async engine")
+    await engine.dispose()
+
+
+async def is_mysql_ready(engine: AsyncEngine | None) -> bool:
+    if engine is None:
         return False
-
     try:
-        async with pool.acquire() as connection:
-            async with connection.cursor() as cursor:
-                await cursor.execute("SELECT 1")
-                row = await cursor.fetchone()
-
-        return row == (1,)
+        async with engine.connect() as connection:
+            result = await connection.execute(text("SELECT 1"))
+            return result.scalar_one() == 1
     except Exception:
         logger.warning("MySQL readiness check failed", exc_info=True)
         return False

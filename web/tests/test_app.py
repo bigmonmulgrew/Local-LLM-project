@@ -1,6 +1,6 @@
 import asyncio
 
-from hello_web.main import healthz
+from L3M_Web.main import healthz
 
 
 def test_healthz() -> None:

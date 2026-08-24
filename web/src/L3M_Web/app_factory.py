@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from L3M_Web.api.routes.chat import router as chat_router
 from L3M_Web.api.routes.health import router as health_router
 from L3M_Web.api.routes.home import router as home_router
+from L3M_Web.api.routes.users import router as users_router
 from L3M_Web.config.logging import setup_logging
 from L3M_Web.config.settings import Settings
 from L3M_Web.config.summary import log_settings_summary
@@ -28,7 +29,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or Settings()
 
     setup_logging(app_settings.log_level)
-
     try:
         validate_settings(app_settings)
     except SettingsValidationError as exc:
@@ -36,7 +36,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         raise
 
     log_settings_summary(app_settings)
-
     templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
     app = FastAPI(
@@ -44,7 +43,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version="0.1.0",
         lifespan=create_lifespan(app_settings),
     )
-
     app.state.settings = app_settings
     app.state.templates = templates
 
@@ -53,9 +51,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         StaticFiles(directory=STATIC_DIR),
         name="static",
     )
-
     app.include_router(home_router)
     app.include_router(health_router)
+    app.include_router(users_router)
     app.include_router(chat_router)
-
     return app

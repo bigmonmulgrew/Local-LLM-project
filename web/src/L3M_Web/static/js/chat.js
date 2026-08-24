@@ -26,11 +26,12 @@
     };
 
     const savedUsername = localStorage.getItem(USER_KEY) || "";
-    let currentUser = savedUsername.trim() || "Guest";
+    let confirmedUser = null;
     let chats = [];
     let activeChat = null;
     let pendingFiles = [];
     let usernameTimer = null;
+    let confirmationVersion = 0;
     let busy = false;
 
     localStorage.removeItem(OLD_CHAT_KEY);
@@ -48,20 +49,22 @@
         const response = await fetch(path, { ...options, headers });
 
         if (!response.ok) {
-            let detail = `Request failed with status ${response.status}`;
-            try {
-                const body = await response.json();
-                detail = body.detail || detail;
-            } catch (_) {
-                // The response did not contain JSON.
-            }
-            throw new Error(detail);
+            const body = await response.json().catch(() => null);
+
+            // TODO Nested ternary operator, hard to read, separate this.
+            const detail = typeof body?.detail === "string" 
+                ? body.detail
+                : body?.detail
+                    ? JSON.stringify(body.detail)
+                    : `Request failed with status ${response.status}`;
+
+            throw new Error(`${options.method || "GET"} ${path}: ${detail}`);
         }
         return response.status === 204 ? null : response.json();
     }
 
     function userQuery() {
-        return new URLSearchParams({ user: currentUser }).toString();
+        return new URLSearchParams({ user_id: confirmedUser.id }).toString();
     }
 
     function escapeHtml(value) {
@@ -167,7 +170,7 @@
             elements.messages.replaceChildren(...activeChat.messages.map((message) => {
                 const article = document.createElement("article");
                 article.className = `message ${message.role}`;
-                const name = message.role === "user" ? currentUser : "L3M";
+                const name = message.role === "user" ? confirmedUser?.username || "User" : "L3M";
                 const avatar = message.role === "user" ? name.slice(0, 2).toUpperCase() : "L3";
                 const attachments = (message.attachments || [])
                     .map((file) => `<span class="message-file">📎 ${escapeHtml(file.name)} · ${formatBytes(file.size)}</span>`)
@@ -206,6 +209,7 @@
     }
 
     async function loadChats({ preserveActive = false } = {}) {
+        if (!confirmedUser) return;
         setApiStatus("connecting", "Loading chats…");
         try {
             chats = await apiRequest(`/api/chats?${userQuery()}`);
@@ -237,7 +241,7 @@
     async function createChat(title) {
         return apiRequest("/api/chats", {
             method: "POST",
-            body: JSON.stringify({ user: currentUser, title })
+            body: JSON.stringify({ user_id: confirmedUser.id, title })
         });
     }
 
@@ -254,7 +258,7 @@
         try {
             const updated = await apiRequest(`/api/chats/${encodeURIComponent(chatId)}`, {
                 method: "PATCH",
-                body: JSON.stringify({ user: currentUser, title: cleanTitle.slice(0, 80) })
+                body: JSON.stringify({ user_id: confirmedUser.id, title: cleanTitle.slice(0, 80) })
             });
             if (activeChat?.id === updated.id) activeChat = updated;
             await loadChats({ preserveActive: true });
@@ -281,12 +285,13 @@
         busy = true;
         updateComposer();
         try {
+            if (!await ensureConfirmedUser()) return;
             if (!activeChat) {
                 const title = content.replace(/[`*_>#]/g, "").slice(0, 42) || "New conversation";
                 activeChat = await createChat(title);
             }
             const body = new FormData();
-            body.append("user", currentUser);
+            body.append("user_id", confirmedUser.id);
             body.append("role", "user");
             body.append("text", content);
             pendingFiles.forEach((file) => body.append("files", file, file.name));
@@ -312,7 +317,8 @@
         }
     }
 
-    function startNewChat() {
+    async function startNewChat() {
+        if (!await ensureConfirmedUser()) return;
         activeChat = null;
         pendingFiles = [];
         elements.fileInput.value = "";
@@ -326,15 +332,79 @@
         elements.menuButton.setAttribute("aria-expanded", "false");
     }
 
+    async function confirmUsername() {
+        clearTimeout(usernameTimer);
+        const username = elements.username.value.trim();
+        localStorage.setItem(USER_KEY, elements.username.value);
+        const requestVersion = ++confirmationVersion;
+
+        if (!username) {
+            confirmedUser = null;
+            chats = [];
+            activeChat = null;
+            setApiStatus("connecting", "Enter a username");
+            render();
+            return null;
+        }
+
+        setApiStatus("connecting", "Confirming username…");
+        try {
+            const user = await apiRequest("/api/users/resolve", {
+                method: "POST",
+                body: JSON.stringify({ username })
+            });
+            if (
+                requestVersion !== confirmationVersion
+                || elements.username.value.trim() !== username
+            ) {
+                return null;
+            }
+            confirmedUser = user;
+            activeChat = null;
+            pendingFiles = [];
+            await loadChats();
+            return user;
+        } catch (error) {
+            if (requestVersion === confirmationVersion) {
+                confirmedUser = null;
+                chats = [];
+                activeChat = null;
+                setApiStatus("error", "Username confirmation failed");
+                render();
+            }
+            console.error(error);
+            return null;
+        }
+    }
+
+    async function ensureConfirmedUser() {
+        const username = elements.username.value.trim();
+        if (confirmedUser && confirmedUser.username === username) return confirmedUser;
+        return confirmUsername();
+    }
+
     elements.username.addEventListener("input", () => {
         const value = elements.username.value;
         localStorage.setItem(USER_KEY, value);
-        currentUser = value.trim() || "Guest";
+        confirmationVersion += 1;
+        confirmedUser = null;
+        chats = [];
         activeChat = null;
         pendingFiles = [];
+        setApiStatus("connecting", value.trim() ? "Waiting to confirm…" : "Enter a username");
+        render();
         clearTimeout(usernameTimer);
-        usernameTimer = setTimeout(() => loadChats(), 350);
+        if (value.trim()) {
+            usernameTimer = setTimeout(confirmUsername, 5000);
+        }
     });
+    elements.username.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            confirmUsername();
+        }
+    });
+    elements.username.addEventListener("blur", confirmUsername);
     elements.newChat.addEventListener("click", startNewChat);
     elements.chatList.addEventListener("click", (event) => {
         const renameButton = event.target.closest("[data-rename-chat]");
@@ -388,5 +458,9 @@
     elements.scrim.addEventListener("click", closeSidebar);
 
     render();
-    loadChats();
+    if (savedUsername.trim()) {
+        confirmUsername();
+    } else {
+        setApiStatus("connecting", "Enter a username");
+    }
 })();

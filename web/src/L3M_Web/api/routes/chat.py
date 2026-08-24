@@ -6,18 +6,24 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile, status
 
-from L3M_Web.api.dependencies import OllamaClientDependency, SettingsDependency
+from L3M_Web.api.dependencies import (
+    DatabaseSessionDependency,
+    OllamaClientDependency,
+    SettingsDependency,
+)
 from L3M_Web.api.models.chat import (
     Chat,
     ChatSummary,
     CreateChatRequest,
     FileObject,
-    Message,
     RenameChatRequest,
     SendMessageResponse,
 )
-from L3M_Web.api.services.ollama_chat import OllamaGenerationError, generate_chat_response
-from L3M_Web.api.services.chat_store import chat_store
+from L3M_Web.api.services.ollama_chat import (
+    OllamaGenerationError,
+    generate_chat_response,
+)
+from L3M_Web.database.chat_repository import ChatRepository
 
 router = APIRouter(prefix="/api/chats", tags=["chats"])
 MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -36,34 +42,46 @@ def require_non_blank(value: str, field_name: str) -> str:
 
 @router.get("", response_model=list[ChatSummary])
 async def list_chats(
-    user: str = Query(min_length=1, max_length=48),
+    session: DatabaseSessionDependency,
+    user_id: str = Query(min_length=36, max_length=36),
 ) -> list[ChatSummary]:
-    return await chat_store.list_chats(require_non_blank(user, "user"))
+    return await ChatRepository(session).list_chats(user_id)
 
 
 @router.post("", response_model=Chat, status_code=status.HTTP_201_CREATED)
-async def create_chat(payload: CreateChatRequest) -> Chat:
-    return await chat_store.create_chat(
-        require_non_blank(payload.user, "user"),
+async def create_chat(
+    payload: CreateChatRequest,
+    session: DatabaseSessionDependency,
+) -> Chat:
+    chat = await ChatRepository(session).create_chat(
+        payload.user_id,
         require_non_blank(payload.title, "title"),
     )
+    if chat is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return chat
 
 
 @router.get("/{chat_id}", response_model=Chat)
 async def get_chat(
     chat_id: str,
-    user: str = Query(min_length=1, max_length=48),
+    session: DatabaseSessionDependency,
+    user_id: str = Query(min_length=36, max_length=36),
 ) -> Chat:
-    chat = await chat_store.get_chat(require_non_blank(user, "user"), chat_id)
+    chat = await ChatRepository(session).get_chat(user_id, chat_id)
     if chat is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
     return chat
 
 
 @router.patch("/{chat_id}", response_model=Chat)
-async def rename_chat(chat_id: str, payload: RenameChatRequest) -> Chat:
-    chat = await chat_store.rename_chat(
-        require_non_blank(payload.user, "user"),
+async def rename_chat(
+    chat_id: str,
+    payload: RenameChatRequest,
+    session: DatabaseSessionDependency,
+) -> Chat:
+    chat = await ChatRepository(session).rename_chat(
+        payload.user_id,
         chat_id,
         require_non_blank(payload.title, "title"),
     )
@@ -75,9 +93,10 @@ async def rename_chat(chat_id: str, payload: RenameChatRequest) -> Chat:
 @router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chat(
     chat_id: str,
-    user: str = Query(min_length=1, max_length=48),
+    session: DatabaseSessionDependency,
+    user_id: str = Query(min_length=36, max_length=36),
 ) -> Response:
-    deleted = await chat_store.delete_chat(require_non_blank(user, "user"), chat_id)
+    deleted = await ChatRepository(session).delete_chat(user_id, chat_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -90,21 +109,19 @@ async def delete_chat(
 )
 async def add_message(
     chat_id: str,
+    session: DatabaseSessionDependency,
     ollama_client: OllamaClientDependency,
     settings: SettingsDependency,
-    user: str = Form(min_length=1, max_length=48),
+    user_id: str = Form(min_length=36, max_length=36),
     role: Literal["user", "assistant"] = Form(default="user"),
     text: str = Form(default=""),
     files: list[UploadFile] = File(default=[]),
 ) -> SendMessageResponse:
     if not text.strip() and not files:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="A message requires text or at least one file",
-        )
+        raise HTTPException( status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A message requires text or at least one file")
 
-    clean_user = require_non_blank(user, "user")
-    chat = await chat_store.get_chat(clean_user, chat_id)
+    repository = ChatRepository(session)
+    chat = await repository.get_chat(user_id, chat_id)
     if chat is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
 
@@ -143,12 +160,9 @@ async def add_message(
             await file.close()
 
     stored_content = text.strip() or "Attached files"
-
-    # Assistant messages can also enter through this endpoint without causing
-    # another model call.
     if role == "assistant":
-        message = await chat_store.add_message(
-            user=clean_user,
+        message = await repository.add_message(
+            user_id=user_id,
             chat_id=chat_id,
             role=role,
             content=stored_content,
@@ -165,7 +179,10 @@ async def add_message(
         if not attachment.content_type.startswith("image/")
     ]
     if non_image_files:
-        prompt_content += "\n\nAttached files (contents not yet available): " + ", ".join(non_image_files)
+        prompt_content += (
+            "\n\nAttached files (contents not yet available): "
+            + ", ".join(non_image_files)
+        )
 
     ollama_messages: list[dict[str, object]] = [
         {"role": message.role, "content": message.content}
@@ -197,8 +214,8 @@ async def add_message(
             detail=str(exc),
         ) from exc
 
-    exchange = await chat_store.add_exchange(
-        user=clean_user,
+    exchange = await repository.add_exchange(
+        user_id=user_id,
         chat_id=chat_id,
         user_content=stored_content,
         attachments=attachments,
