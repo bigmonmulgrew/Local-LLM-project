@@ -13,6 +13,42 @@ import {
     shortTime
 } from "./formatting.js";
 
+/**
+ * The view depends only on this published state shape, not on controller
+ * internals. Keeping that boundary explicit makes the renderer easy to test.
+ *
+ * @typedef {Object} ChatViewState
+ * @property {string} usernameInput
+ * @property {{id: string, username: string}|null} currentUser
+ * @property {Array<{id: string, title: string, updated_at: string, last_message_preview?: string|null}>} chatSummaries
+ * @property {{id: string, title: string, updated_at: string, messages: Array<{id: string, role: "user"|"assistant", content: string, created_at: string, attachments?: Array<{name: string, size: number}>}>}|null} selectedChat
+ * @property {File[]} draftAttachments
+ * @property {boolean} isSendingMessage
+ */
+
+/**
+ * Required elements from the chat page template.
+ *
+ * @typedef {Object} ChatElements
+ * @property {HTMLElement} app
+ * @property {HTMLInputElement} usernameInput
+ * @property {HTMLButtonElement} newChatButton
+ * @property {HTMLElement} chatList
+ * @property {HTMLElement} chatCount
+ * @property {HTMLElement} chatTitle
+ * @property {HTMLElement} chatMetadata
+ * @property {HTMLElement} messageHistory
+ * @property {HTMLFormElement} composer
+ * @property {HTMLTextAreaElement} messageInput
+ * @property {HTMLButtonElement} sendButton
+ * @property {HTMLInputElement} fileInput
+ * @property {HTMLElement} attachmentList
+ * @property {HTMLButtonElement} menuButton
+ * @property {HTMLElement} sidebarScrim
+ * @property {HTMLElement} apiStatus
+ * @property {HTMLElement} apiStatusContainer
+ */
+
 const ELEMENT_SELECTORS = Object.freeze({
     usernameInput: "#username",
     newChatButton: "[data-new-chat]",
@@ -32,22 +68,45 @@ const ELEMENT_SELECTORS = Object.freeze({
     apiStatusContainer: "[data-api-status-wrap]"
 });
 
+/**
+ * Fail during initialization instead of producing a later, ambiguous null
+ * reference when the template and JavaScript selectors drift apart.
+ *
+ * @param {Document} rootDocument
+ * @param {string} name
+ * @param {string} selector
+ * @returns {Element}
+ */
 function findRequiredElement(rootDocument, name, selector) {
     const element = rootDocument.querySelector(selector);
     if (!element) {
-        throw new Error( `Chat view is missing required element "${name}" (${selector})` );
+        throw new Error(
+            `Chat view is missing required element "${name}" (${selector})`
+        );
     }
     return element;
 }
 
+/**
+ * @param {Document} rootDocument
+ * @param {Element} app
+ * @returns {Readonly<ChatElements>}
+ */
 function collectElements(rootDocument, app) {
     const elements = { app };
     Object.entries(ELEMENT_SELECTORS).forEach(([name, selector]) => {
         elements[name] = findRequiredElement(rootDocument, name, selector);
     });
-    return Object.freeze(elements);
+    return /** @type {Readonly<ChatElements>} */ (Object.freeze(elements));
 }
 
+/**
+ * Create the DOM adapter for a page containing a chat application root.
+ *
+ * @param {Document} [rootDocument]
+ * @param {typeof requestAnimationFrame} [scheduleFrame]
+ * @returns {Readonly<Object>|null}
+ */
 export function createChatView(
     rootDocument = globalThis.document,
     scheduleFrame = globalThis.requestAnimationFrame
@@ -56,11 +115,13 @@ export function createChatView(
     if (!app) return null;
     const elements = collectElements(rootDocument, app);
 
+    /** @param {string} status @param {string} message @returns {void} */
     function renderStatus(status, message) {
         elements.apiStatusContainer.dataset.state = status;
         elements.apiStatus.textContent = message;
     }
 
+    /** @param {ChatViewState} state @returns {void} */
     function renderChatList(state) {
         elements.chatCount.textContent = String(state.chatSummaries.length);
         if (!state.chatSummaries.length) {
@@ -102,6 +163,7 @@ export function createChatView(
         elements.chatList.replaceChildren(...chatItems);
     }
 
+    /** @param {ChatViewState} state @returns {void} */
     function renderConversation(state) {
         const chat = state.selectedChat;
         if (!chat || chat.messages.length === 0) {
@@ -151,11 +213,14 @@ export function createChatView(
             elements.messageHistory.replaceChildren(...messages);
         }
 
+        // Rendering may change the history height. Scroll on the next frame so
+        // layout has incorporated the newly inserted message elements.
         scheduleFrame(() => {
             elements.messageHistory.scrollTop = elements.messageHistory.scrollHeight;
         });
     }
 
+    /** @param {ChatViewState} state @returns {void} */
     function renderDraft(state) {
         const attachments = state.draftAttachments.map((file, index) => {
             const chip = rootDocument.createElement("span");
@@ -169,6 +234,7 @@ export function createChatView(
         elements.attachmentList.replaceChildren(...attachments);
     }
 
+    /** @param {ChatViewState} state @returns {void} */
     function updateComposer(state) {
         elements.messageInput.style.height = "auto";
         elements.messageInput.style.height = `${Math.min(
@@ -182,6 +248,7 @@ export function createChatView(
             );
     }
 
+    /** @param {ChatViewState} state @returns {void} */
     function render(state) {
         const chat = state.selectedChat;
         elements.chatTitle.textContent = chat?.title || "New conversation";
@@ -194,29 +261,40 @@ export function createChatView(
         updateComposer(state);
     }
 
+    /** @param {string} value @returns {void} */
     function setUsernameInput(value) {
         elements.usernameInput.value = value;
     }
 
+    /**
+     * Do not erase text typed while a send request was in flight.
+     *
+     * @param {string} submittedText
+     * @returns {boolean} Whether the submitted draft was cleared.
+     */
     function clearDraftTextIfUnchanged(submittedText) {
         if (elements.messageInput.value !== submittedText) return false;
         elements.messageInput.value = "";
         return true;
     }
 
+    /** @returns {void} */
     function clearFileInput() {
         elements.fileInput.value = "";
     }
 
+    /** @returns {void} */
     function focusMessageInput() {
         elements.messageInput.focus();
     }
 
+    /** @returns {void} */
     function closeSidebar() {
         elements.app.classList.remove("sidebar-open");
         elements.menuButton.setAttribute("aria-expanded", "false");
     }
 
+    /** @returns {boolean} Current open state. */
     function toggleSidebar() {
         const isOpen = elements.app.classList.toggle("sidebar-open");
         elements.menuButton.setAttribute("aria-expanded", String(isOpen));

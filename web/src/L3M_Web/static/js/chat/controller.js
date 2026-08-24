@@ -6,15 +6,93 @@
  * snapshots for the view to render.
  */
 
+/**
+ * @typedef {Object} User
+ * @property {string} id Database UUID.
+ * @property {string} username Confirmed display name.
+ */
+
+/**
+ * @typedef {Object} FileObject
+ * @property {string} name
+ * @property {number} size
+ * @property {string} [type]
+ */
+
+/**
+ * @typedef {Object} Message
+ * @property {string} id
+ * @property {"user"|"assistant"} role
+ * @property {string} content
+ * @property {string} created_at
+ * @property {FileObject[]} attachments
+ */
+
+/**
+ * @typedef {Object} ChatSummary
+ * @property {string} id
+ * @property {string} title
+ * @property {string} updated_at
+ * @property {string|null} [last_message_preview]
+ */
+
+/** @typedef {ChatSummary & {messages: Message[]}} Chat */
+
+/**
+ * @typedef {Object} ChatApi
+ * @property {(username: string) => Promise<User>} resolveUser
+ * @property {(userId: string) => Promise<ChatSummary[]>} listChats
+ * @property {(userId: string, chatId: string) => Promise<Chat>} getChat
+ * @property {(userId: string, title: string) => Promise<Chat>} createChat
+ * @property {(userId: string, chatId: string, title: string) => Promise<Chat>} renameChat
+ * @property {(userId: string, chatId: string) => Promise<unknown>} deleteChat
+ * @property {(userId: string, chatId: string, message: {text: string, files: File[]}) => Promise<unknown>} sendMessage
+ */
+
+/** @typedef {"connecting"|"ready"|"error"} ConnectionStatus */
+
+/**
+ * Immutable state published to the view.
+ *
+ * @typedef {Object} ChatState
+ * @property {string} usernameInput
+ * @property {Readonly<User>|null} currentUser
+ * @property {ReadonlyArray<Readonly<ChatSummary>>} chatSummaries
+ * @property {Readonly<Chat>|null} selectedChat
+ * @property {ReadonlyArray<File>} draftAttachments
+ * @property {boolean} isSendingMessage
+ */
+
+/**
+ * @typedef {Object} ChatControllerOptions
+ * @property {ChatApi} api
+ * @property {Storage} [storage]
+ * @property {(state: ChatState) => void} [onStateChange]
+ * @property {(status: ConnectionStatus, message: string) => void} [onStatusChange]
+ * @property {Pick<Console, "error">} [logger]
+ * @property {number} [usernameConfirmationDelay]
+ * @property {typeof setTimeout} [setTimer]
+ * @property {typeof clearTimeout} [clearTimer]
+ */
+
+/**
+ * @typedef {Object} SubmitDraftResult
+ * @property {boolean} sent
+ * @property {string} submittedText
+ */
+
 const USERNAME_STORAGE_KEY = "l3m-chat-username";
 const LEGACY_CHAT_STORAGE_KEY = "l3m-chat-prototype-v1";
 
+/** @returns {void} */
 function noOperation() {}
 
+/** @template T @param {T|null} record @returns {Readonly<T>|null} */
 function freezeRecord(record) {
     return record ? Object.freeze({ ...record }) : null;
 }
 
+/** @param {Chat|null} chat @returns {Readonly<Chat>|null} */
 function freezeChat(chat) {
     if (!chat) return null;
     const messages = (chat.messages || []).map((message) => Object.freeze({
@@ -30,6 +108,11 @@ function freezeChat(chat) {
     });
 }
 
+/**
+ * Create the stateful workflow boundary used by the browser entry point.
+ *
+ * @param {ChatControllerOptions} options
+ */
 export function createChatController({
     api,
     storage = globalThis.localStorage,
@@ -42,9 +125,12 @@ export function createChatController({
 }) {
     if (!api) throw new TypeError("A chat API client is required");
 
+    // Conversation data belongs to the server. The username is the only local
+    // preference because it is needed to restore the user's view after reload.
     const savedUsername = storage.getItem(USERNAME_STORAGE_KEY) || "";
     storage.removeItem(LEGACY_CHAT_STORAGE_KEY);
 
+    /** @type {{usernameInput: string, currentUser: User|null, chatSummaries: ChatSummary[], selectedChat: Chat|null, draftAttachments: File[], isSendingMessage: boolean}} */
     const state = {
         usernameInput: savedUsername,
         currentUser: null,
@@ -54,12 +140,19 @@ export function createChatController({
         isSendingMessage: false
     };
 
+    /** @type {ReturnType<typeof setTimeout>|null} */
     let usernameConfirmationTimerId = null;
     let usernameRevision = 0;
+    /** @type {{username: string, revision: number, promise: Promise<User|null>}|null} */
     let usernameConfirmation = null;
+
+    // Version counters make response order explicit. A request may finish
+    // successfully yet still be obsolete after the user changes identity or
+    // selects another chat, so obsolete results are discarded before mutation.
     let chatListRequestVersion = 0;
     let chatSelectionRequestVersion = 0;
 
+    /** @returns {Readonly<ChatState>} */
     function getState() {
         return Object.freeze({
             ...state,
@@ -72,19 +165,23 @@ export function createChatController({
         });
     }
 
+    /** @returns {void} */
     function publishState() {
         onStateChange(getState());
     }
 
+    /** @param {ConnectionStatus} status @param {string} message */
     function publishStatus(status, message) {
         onStatusChange(status, message);
     }
 
+    /** @returns {void} */
     function invalidateChatRequests() {
         chatListRequestVersion += 1;
         chatSelectionRequestVersion += 1;
     }
 
+    /** @returns {void} */
     function cancelUsernameTimer() {
         if (usernameConfirmationTimerId !== null) {
             clearTimer(usernameConfirmationTimerId);
@@ -92,6 +189,10 @@ export function createChatController({
         }
     }
 
+    /**
+     * @param {{preserveSelectedChat?: boolean}} [options]
+     * @returns {Promise<boolean>}
+     */
     async function loadChatSummaries({ preserveSelectedChat = false } = {}) {
         if (!state.currentUser) return false;
 
@@ -114,7 +215,10 @@ export function createChatController({
             publishState();
             return true;
         } catch (error) {
-            if ( requestVersion !== chatListRequestVersion || state.currentUser?.id !== userId ) {
+            if (
+                requestVersion !== chatListRequestVersion
+                || state.currentUser?.id !== userId
+            ) {
                 return false;
             }
 
@@ -126,6 +230,7 @@ export function createChatController({
         }
     }
 
+    /** @returns {Promise<User|null>} */
     async function resolveUsername() {
         cancelUsernameTimer();
         const username = state.usernameInput.trim();
@@ -145,8 +250,12 @@ export function createChatController({
 
         if (state.currentUser?.username === username) return state.currentUser;
 
-        // Blur, Enter and Send share one request for the same input revision.
-        if ( usernameConfirmation?.username === username && usernameConfirmation.revision === revision ) {
+        // Blur, Enter, the idle timer and Send can fire together. Sharing the
+        // promise prevents duplicate resolve/create requests for one revision.
+        if (
+            usernameConfirmation?.username === username
+            && usernameConfirmation.revision === revision
+        ) {
             return usernameConfirmation.promise;
         }
 
@@ -154,7 +263,10 @@ export function createChatController({
         const promise = (async () => {
             try {
                 const user = await api.resolveUser(username);
-                if ( revision !== usernameRevision || state.usernameInput.trim() !== username ) {
+                if (
+                    revision !== usernameRevision
+                    || state.usernameInput.trim() !== username
+                ) {
                     return null;
                 }
 
@@ -163,12 +275,18 @@ export function createChatController({
                 chatSelectionRequestVersion += 1;
                 await loadChatSummaries();
 
-                if ( revision !== usernameRevision || state.usernameInput.trim() !== username ) {
+                if (
+                    revision !== usernameRevision
+                    || state.usernameInput.trim() !== username
+                ) {
                     return null;
                 }
                 return user;
             } catch (error) {
-                if ( revision === usernameRevision && state.usernameInput.trim() === username ) {
+                if (
+                    revision === usernameRevision
+                    && state.usernameInput.trim() === username
+                ) {
                     state.currentUser = null;
                     state.chatSummaries = [];
                     state.selectedChat = null;
@@ -188,6 +306,7 @@ export function createChatController({
         return promise;
     }
 
+    /** @param {string} value @returns {void} */
     function updateUsernameInput(value) {
         state.usernameInput = value;
         storage.setItem(USERNAME_STORAGE_KEY, value);
@@ -196,6 +315,10 @@ export function createChatController({
         state.currentUser = null;
         state.chatSummaries = [];
         state.selectedChat = null;
+
+        // Keep draft text in the DOM and draft files in controller state while
+        // identity is unresolved. A user who clicks Send to confirm a new name
+        // must not lose the message that triggered confirmation.
         invalidateChatRequests();
         cancelUsernameTimer();
 
@@ -213,12 +336,14 @@ export function createChatController({
         }
     }
 
+    /** @returns {Promise<User|null>} */
     async function ensureCurrentUser() {
         const username = state.usernameInput.trim();
         if (state.currentUser?.username === username) return state.currentUser;
         return resolveUsername();
     }
 
+    /** @param {string} chatId @returns {Promise<boolean>} */
     async function selectChat(chatId) {
         if (!state.currentUser) return false;
 
@@ -228,7 +353,10 @@ export function createChatController({
 
         try {
             const loadedChat = await api.getChat(userId, chatId);
-            if ( requestVersion !== chatSelectionRequestVersion || state.currentUser?.id !== userId ) {
+            if (
+                requestVersion !== chatSelectionRequestVersion
+                || state.currentUser?.id !== userId
+            ) {
                 return false;
             }
 
@@ -237,7 +365,10 @@ export function createChatController({
             publishState();
             return true;
         } catch (error) {
-            if ( requestVersion !== chatSelectionRequestVersion || state.currentUser?.id !== userId ) {
+            if (
+                requestVersion !== chatSelectionRequestVersion
+                || state.currentUser?.id !== userId
+            ) {
                 return false;
             }
 
@@ -247,6 +378,11 @@ export function createChatController({
         }
     }
 
+    /**
+     * @param {string} chatId
+     * @param {string} title
+     * @returns {Promise<boolean>}
+     */
     async function renameChat(chatId, title) {
         const userId = state.currentUser?.id;
         if (!userId) return false;
@@ -268,6 +404,7 @@ export function createChatController({
         }
     }
 
+    /** @param {string} chatId @returns {Promise<boolean>} */
     async function deleteChat(chatId) {
         const userId = state.currentUser?.id;
         if (!userId) return false;
@@ -290,10 +427,14 @@ export function createChatController({
         }
     }
 
+    /** @param {string} draftText @returns {Promise<SubmitDraftResult>} */
     async function submitDraft(draftText) {
         const content = draftText.trim();
         const submittedFiles = [...state.draftAttachments];
-        if ( state.isSendingMessage || (!content && submittedFiles.length === 0) ) {
+        if (
+            state.isSendingMessage
+            || (!content && submittedFiles.length === 0)
+        ) {
             return { sent: false, submittedText: draftText };
         }
 
@@ -308,7 +449,8 @@ export function createChatController({
 
             let targetChat = state.selectedChat;
             if (!targetChat) {
-                const title = content.replace(/[`*_>#]/g, "").slice(0, 42) || "New conversation";
+                const title = content.replace(/[`*_>#]/g, "").slice(0, 42)
+                    || "New conversation";
                 targetChat = await api.createChat(user.id, title);
                 if (state.currentUser?.id === user.id) {
                     state.selectedChat = targetChat;
@@ -335,7 +477,10 @@ export function createChatController({
                     api.listChats(user.id)
                 ]);
 
-                if ( listRequestVersion === chatListRequestVersion && state.currentUser?.id === user.id ) {
+                if (
+                    listRequestVersion === chatListRequestVersion
+                    && state.currentUser?.id === user.id
+                ) {
                     state.chatSummaries = updatedChats;
                     if (state.selectedChat?.id === targetChatId) {
                         state.selectedChat = updatedChat;
@@ -351,7 +496,10 @@ export function createChatController({
 
             return { sent: true, submittedText: draftText };
         } catch (error) {
-            if ( submittedUserId === null || state.currentUser?.id === submittedUserId ) {
+            if (
+                submittedUserId === null
+                || state.currentUser?.id === submittedUserId
+            ) {
                 publishStatus("error", "Message failed");
             }
             logger.error(error);
@@ -362,6 +510,7 @@ export function createChatController({
         }
     }
 
+    /** @returns {Promise<boolean>} */
     async function showNewChat() {
         if (!await ensureCurrentUser()) return false;
         chatSelectionRequestVersion += 1;
@@ -371,17 +520,20 @@ export function createChatController({
         return true;
     }
 
+    /** @param {FileList|File[]} files @returns {void} */
     function addDraftAttachments(files) {
         state.draftAttachments.push(...Array.from(files));
         publishState();
     }
 
+    /** @param {number} index @returns {void} */
     function removeDraftAttachment(index) {
         if (!Number.isInteger(index) || index < 0) return;
         state.draftAttachments.splice(index, 1);
         publishState();
     }
 
+    /** Stop timers and invalidate work that may finish after page teardown. */
     function dispose() {
         cancelUsernameTimer();
         usernameRevision += 1;

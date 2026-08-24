@@ -24,7 +24,12 @@ const calendarDateFormatter = new Intl.DateTimeFormat([], {
     day: "numeric"
 });
 
-/** Escape untrusted values before inserting them into an HTML string. */
+/**
+ * Escape untrusted values before inserting them into an HTML string.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
 export function escapeHtml(value) {
     return String(value ?? "").replace(
         /[&<>"']/g,
@@ -32,6 +37,7 @@ export function escapeHtml(value) {
     );
 }
 
+/** @param {string} text @returns {string} */
 function formatInlineText(text) {
     return escapeHtml(text)
         .replace(/`([^`]+)`/g, "<code>$1</code>")
@@ -39,7 +45,16 @@ function formatInlineText(text) {
         .replace(/\*([^*]+)\*/g, "<em>$1</em>");
 }
 
-/** Convert the supported message syntax into escaped HTML. */
+/**
+ * Convert the supported message syntax into escaped HTML.
+ *
+ * This intentionally small grammar is easier to audit than a partial general
+ * Markdown implementation. Replace it with a maintained parser if the sample
+ * later needs links, tables or nested block structures.
+ *
+ * @param {unknown} source
+ * @returns {string}
+ */
 export function formatMessage(source) {
     const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
     const output = [];
@@ -103,12 +118,22 @@ export function formatMessage(source) {
     return output.join("");
 }
 
-/** Format an ISO timestamp using the browser's current locale. */
+/**
+ * Format an ISO timestamp using the browser's current locale.
+ *
+ * @param {string} isoTimestamp
+ * @returns {string}
+ */
 export function shortTime(isoTimestamp) {
     return timeFormatter.format(new Date(isoTimestamp));
 }
 
-/** Format today's timestamp with a time and older timestamps with a date. */
+/**
+ * Format today's timestamp with a time and older timestamps with a date.
+ *
+ * @param {string} isoTimestamp
+ * @returns {string}
+ */
 export function relativeDate(isoTimestamp) {
     const date = new Date(isoTimestamp);
     const today = new Date();
@@ -119,7 +144,12 @@ export function relativeDate(isoTimestamp) {
     return calendarDateFormatter.format(date);
 }
 
-/** Format a byte count for attachment labels. */
+/**
+ * Format a byte count for attachment labels.
+ *
+ * @param {number} bytes
+ * @returns {string}
+ */
 export function formatBytes(bytes) {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

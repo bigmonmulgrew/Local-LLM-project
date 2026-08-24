@@ -26,6 +26,7 @@ const api = createChatApi();
         onStatusChange: view.renderStatus
     });
 
+    /** Submit the current DOM draft and clear only the values actually sent. */
     async function submitCurrentDraft() {
         const result = await controller.submitDraft(elements.messageInput.value);
         if (!result.sent) return;
@@ -36,6 +37,7 @@ const api = createChatApi();
         view.focusMessageInput();
     }
 
+    /** @returns {Promise<void>} */
     async function openNewChat() {
         if (!await controller.showNewChat()) return;
         view.clearFileInput();
@@ -43,6 +45,7 @@ const api = createChatApi();
         view.closeSidebar();
     }
 
+    /** @param {string} chatId @returns {Promise<void>} */
     async function requestChatRename(chatId) {
         const chat = controller.getState().chatSummaries.find(
             (item) => item.id === chatId
@@ -59,10 +62,16 @@ const api = createChatApi();
         await controller.renameChat(chatId, cleanTitle.slice(0, 80));
     }
 
+    /** @param {string} chatId @returns {Promise<void>} */
     async function selectChatAndCloseSidebar(chatId) {
         if (await controller.selectChat(chatId)) view.closeSidebar();
     }
 
+    /**
+     * @param {Event} event
+     * @param {string} selector
+     * @returns {Element|null}
+     */
     function closestEventTarget(event, selector) {
         if (typeof event.target?.closest !== "function") return null;
         return event.target.closest(selector);
@@ -72,6 +81,7 @@ const api = createChatApi();
         controller.updateUsernameInput(elements.usernameInput.value);
     }
 
+    /** @param {KeyboardEvent} event */
     function handleUsernameKeydown(event) {
         if (event.key !== "Enter") return;
         event.preventDefault();
@@ -86,6 +96,7 @@ const api = createChatApi();
         void openNewChat();
     }
 
+    /** @param {MouseEvent} event */
     function handleChatListClick(event) {
         const renameButton = closestEventTarget(event, "[data-rename-chat]");
         if (renameButton) {
@@ -107,6 +118,7 @@ const api = createChatApi();
         }
     }
 
+    /** @param {KeyboardEvent} event */
     function handleChatListKeydown(event) {
         const isActivationKey = event.key === "Enter" || event.key === " ";
         const isChatItem = typeof event.target?.matches === "function"
@@ -117,6 +129,7 @@ const api = createChatApi();
         void selectChatAndCloseSidebar(event.target.dataset.chatId);
     }
 
+    /** @param {SubmitEvent} event */
     function handleComposerSubmit(event) {
         event.preventDefault();
         void submitCurrentDraft();
@@ -126,6 +139,7 @@ const api = createChatApi();
         view.updateComposer(controller.getState());
     }
 
+    /** @param {KeyboardEvent} event */
     function handleMessageKeydown(event) {
         if (event.key !== "Enter" || event.shiftKey) return;
         event.preventDefault();
@@ -136,6 +150,7 @@ const api = createChatApi();
         controller.addDraftAttachments(elements.fileInput.files);
     }
 
+    /** @param {MouseEvent} event */
     function handleAttachmentListClick(event) {
         const button = closestEventTarget(event, "[data-remove-file]");
         if (!button) return;
@@ -177,6 +192,8 @@ const api = createChatApi();
         window.addEventListener("beforeunload", handleBeforeUnload);
     }
 
+    // Initial rendering is synchronous; resolving a saved username then
+    // hydrates server-owned conversation data without storing it in the browser.
     function initializeApplication() {
         bindEvents();
         const initialState = controller.getState();
