@@ -31,7 +31,10 @@
     let activeChat = null;
     let pendingFiles = [];
     let usernameTimer = null;
-    let confirmationVersion = 0;
+    let usernameRevision = 0;
+    let usernameConfirmation = null;
+    let chatListRequestVersion = 0;
+    let chatSelectionRequestVersion = 0;
     let busy = false;
 
     localStorage.removeItem(OLD_CHAT_KEY);
@@ -42,6 +45,22 @@
         elements.apiStatus.textContent = message;
     }
 
+    async function readApiError(response) {
+        const contentType = response.headers.get("content-type") || "";
+
+        if (contentType.includes("application/json")) {
+            const body = await response.json().catch(() => null);
+            if (typeof body?.detail === "string") return body.detail;
+            if (body?.detail != null) return JSON.stringify(body.detail);
+            if (body != null) return JSON.stringify(body);
+        } else {
+            const body = await response.text().catch(() => "");
+            if (body.trim()) return body.trim();
+        }
+
+        return `Request failed with status ${response.status}`;
+    }
+
     async function apiRequest(path, options = {}) {
         const headers = options.body instanceof FormData
             ? options.headers
@@ -49,22 +68,19 @@
         const response = await fetch(path, { ...options, headers });
 
         if (!response.ok) {
-            const body = await response.json().catch(() => null);
-
-            // TODO Nested ternary operator, hard to read, separate this.
-            const detail = typeof body?.detail === "string" 
-                ? body.detail
-                : body?.detail
-                    ? JSON.stringify(body.detail)
-                    : `Request failed with status ${response.status}`;
-
+            const detail = await readApiError(response);
             throw new Error(`${options.method || "GET"} ${path}: ${detail}`);
         }
         return response.status === 204 ? null : response.json();
     }
 
-    function userQuery() {
-        return new URLSearchParams({ user_id: confirmedUser.id }).toString();
+    function userQuery(userId = confirmedUser?.id) {
+        return new URLSearchParams({ user_id: userId }).toString();
+    }
+
+    function invalidateChatRequests() {
+        chatListRequestVersion += 1;
+        chatSelectionRequestVersion += 1;
     }
 
     function escapeHtml(value) {
@@ -210,15 +226,29 @@
 
     async function loadChats({ preserveActive = false } = {}) {
         if (!confirmedUser) return;
+        const userId = confirmedUser.id;
+        const requestVersion = ++chatListRequestVersion;
+        if (!preserveActive) activeChat = null;
         setApiStatus("connecting", "Loading chats…");
         try {
-            chats = await apiRequest(`/api/chats?${userQuery()}`);
-            if (!preserveActive) activeChat = null;
+            const loadedChats = await apiRequest(`/api/chats?${userQuery(userId)}`);
+            if (
+                requestVersion !== chatListRequestVersion
+                || confirmedUser?.id !== userId
+            ) {
+                return;
+            }
+            chats = loadedChats;
             setApiStatus("ready", "API connected");
             render();
         } catch (error) {
+            if (
+                requestVersion !== chatListRequestVersion
+                || confirmedUser?.id !== userId
+            ) {
+                return;
+            }
             chats = [];
-            activeChat = null;
             setApiStatus("error", "API unavailable");
             render();
             console.error(error);
@@ -226,26 +256,46 @@
     }
 
     async function selectChat(chatId) {
+        if (!confirmedUser) return;
+        const userId = confirmedUser.id;
+        const requestVersion = ++chatSelectionRequestVersion;
         try {
             setApiStatus("connecting", "Loading conversation…");
-            activeChat = await apiRequest(`/api/chats/${encodeURIComponent(chatId)}?${userQuery()}`);
+            const loadedChat = await apiRequest(
+                `/api/chats/${encodeURIComponent(chatId)}?${userQuery(userId)}`
+            );
+            if (
+                requestVersion !== chatSelectionRequestVersion
+                || confirmedUser?.id !== userId
+            ) {
+                return;
+            }
+            activeChat = loadedChat;
             setApiStatus("ready", "API connected");
             render();
             closeSidebar();
         } catch (error) {
+            if (
+                requestVersion !== chatSelectionRequestVersion
+                || confirmedUser?.id !== userId
+            ) {
+                return;
+            }
             setApiStatus("error", "Could not load chat");
             console.error(error);
         }
     }
 
-    async function createChat(title) {
+    async function createChat(userId, title) {
         return apiRequest("/api/chats", {
             method: "POST",
-            body: JSON.stringify({ user_id: confirmedUser.id, title })
+            body: JSON.stringify({ user_id: userId, title })
         });
     }
 
     async function renameChat(chatId) {
+        const userId = confirmedUser?.id;
+        if (!userId) return;
         const chat = chats.find((item) => item.id === chatId);
         if (!chat) return;
         const title = window.prompt("Rename chat", chat.title);
@@ -258,8 +308,9 @@
         try {
             const updated = await apiRequest(`/api/chats/${encodeURIComponent(chatId)}`, {
                 method: "PATCH",
-                body: JSON.stringify({ user_id: confirmedUser.id, title: cleanTitle.slice(0, 80) })
+                body: JSON.stringify({ user_id: userId, title: cleanTitle.slice(0, 80) })
             });
+            if (confirmedUser?.id !== userId) return;
             if (activeChat?.id === updated.id) activeChat = updated;
             await loadChats({ preserveActive: true });
         } catch (error) {
@@ -269,8 +320,14 @@
     }
 
     async function deleteChat(chatId) {
+        const userId = confirmedUser?.id;
+        if (!userId) return;
         try {
-            await apiRequest(`/api/chats/${encodeURIComponent(chatId)}?${userQuery()}`, { method: "DELETE" });
+            await apiRequest(
+                `/api/chats/${encodeURIComponent(chatId)}?${userQuery(userId)}`,
+                { method: "DELETE" }
+            );
+            if (confirmedUser?.id !== userId) return;
             if (activeChat?.id === chatId) activeChat = null;
             await loadChats({ preserveActive: true });
         } catch (error) {
@@ -280,36 +337,70 @@
     }
 
     async function sendMessage() {
-        const content = elements.input.value.trim();
+        const draftText = elements.input.value;
+        const content = draftText.trim();
+        const submittedFiles = [...pendingFiles];
         if (busy || (!content && pendingFiles.length === 0)) return;
         busy = true;
+        let submittedUserId = null;
         updateComposer();
         try {
-            if (!await ensureConfirmedUser()) return;
-            if (!activeChat) {
+            const user = await ensureConfirmedUser();
+            if (!user) return;
+            submittedUserId = user.id;
+
+            let targetChat = activeChat;
+            if (!targetChat) {
                 const title = content.replace(/[`*_>#]/g, "").slice(0, 42) || "New conversation";
-                activeChat = await createChat(title);
+                targetChat = await createChat(user.id, title);
+                if (confirmedUser?.id === user.id) activeChat = targetChat;
             }
+
+            const targetChatId = targetChat.id;
             const body = new FormData();
-            body.append("user_id", confirmedUser.id);
+            body.append("user_id", user.id);
             body.append("role", "user");
             body.append("text", content);
-            pendingFiles.forEach((file) => body.append("files", file, file.name));
+            submittedFiles.forEach((file) => body.append("files", file, file.name));
             setApiStatus("connecting", "Ollama is responding…");
-            await apiRequest(`/api/chats/${encodeURIComponent(activeChat.id)}/messages`, {
+            await apiRequest(`/api/chats/${encodeURIComponent(targetChatId)}/messages`, {
                 method: "POST",
                 body
             });
-            elements.input.value = "";
+
+            // Preserve edits made while the submitted draft was in flight.
+            if (elements.input.value === draftText) elements.input.value = "";
             elements.fileInput.value = "";
-            pendingFiles = [];
-            activeChat = await apiRequest(`/api/chats/${encodeURIComponent(activeChat.id)}?${userQuery()}`);
-            chats = await apiRequest(`/api/chats?${userQuery()}`);
-            setApiStatus("ready", "API connected");
-            render();
-            elements.input.focus();
+            pendingFiles = pendingFiles.filter((file) => !submittedFiles.includes(file));
+
+            try {
+                const listRequestVersion = ++chatListRequestVersion;
+                const [updatedChat, updatedChats] = await Promise.all([
+                    apiRequest(`/api/chats/${encodeURIComponent(targetChatId)}?${userQuery(user.id)}`),
+                    apiRequest(`/api/chats?${userQuery(user.id)}`)
+                ]);
+
+                if (
+                    listRequestVersion === chatListRequestVersion
+                    && confirmedUser?.id === user.id
+                ) {
+                    chats = updatedChats;
+                    if (activeChat?.id === targetChatId) activeChat = updatedChat;
+                    setApiStatus("ready", "API connected");
+                    render();
+                    elements.input.focus();
+                }
+            } catch (refreshError) {
+                if (confirmedUser?.id === user.id) {
+                    setApiStatus("error", "Message sent; refresh failed");
+                    render();
+                }
+                console.error(refreshError);
+            }
         } catch (error) {
-            setApiStatus("error", "Message failed");
+            if (submittedUserId === null || confirmedUser?.id === submittedUserId) {
+                setApiStatus("error", "Message failed");
+            }
             console.error(error);
         } finally {
             busy = false;
@@ -319,6 +410,7 @@
 
     async function startNewChat() {
         if (!await ensureConfirmedUser()) return;
+        chatSelectionRequestVersion += 1;
         activeChat = null;
         pendingFiles = [];
         elements.fileInput.value = "";
@@ -336,45 +428,76 @@
         clearTimeout(usernameTimer);
         const username = elements.username.value.trim();
         localStorage.setItem(USER_KEY, elements.username.value);
-        const requestVersion = ++confirmationVersion;
+        const revision = usernameRevision;
 
         if (!username) {
+            usernameConfirmation = null;
             confirmedUser = null;
             chats = [];
             activeChat = null;
+            invalidateChatRequests();
             setApiStatus("connecting", "Enter a username");
             render();
             return null;
         }
 
-        setApiStatus("connecting", "Confirming username…");
-        try {
-            const user = await apiRequest("/api/users/resolve", {
-                method: "POST",
-                body: JSON.stringify({ username })
-            });
-            if (
-                requestVersion !== confirmationVersion
-                || elements.username.value.trim() !== username
-            ) {
-                return null;
-            }
-            confirmedUser = user;
-            activeChat = null;
-            pendingFiles = [];
-            await loadChats();
-            return user;
-        } catch (error) {
-            if (requestVersion === confirmationVersion) {
-                confirmedUser = null;
-                chats = [];
-                activeChat = null;
-                setApiStatus("error", "Username confirmation failed");
-                render();
-            }
-            console.error(error);
-            return null;
+        if (confirmedUser?.username === username) return confirmedUser;
+
+        if (
+            usernameConfirmation?.username === username
+            && usernameConfirmation.revision === revision
+        ) {
+            return usernameConfirmation.promise;
         }
+
+        setApiStatus("connecting", "Confirming username…");
+        const promise = (async () => {
+            try {
+                const user = await apiRequest("/api/users/resolve", {
+                    method: "POST",
+                    body: JSON.stringify({ username })
+                });
+                if (
+                    revision !== usernameRevision
+                    || elements.username.value.trim() !== username
+                ) {
+                    return null;
+                }
+
+                confirmedUser = user;
+                activeChat = null;
+                chatSelectionRequestVersion += 1;
+                await loadChats();
+
+                if (
+                    revision !== usernameRevision
+                    || elements.username.value.trim() !== username
+                ) {
+                    return null;
+                }
+                return user;
+            } catch (error) {
+                if (
+                    revision === usernameRevision
+                    && elements.username.value.trim() === username
+                ) {
+                    confirmedUser = null;
+                    chats = [];
+                    activeChat = null;
+                    setApiStatus("error", "Username confirmation failed");
+                    render();
+                    console.error(error);
+                }
+                return null;
+            } finally {
+                if (usernameConfirmation?.promise === promise) {
+                    usernameConfirmation = null;
+                }
+            }
+        })();
+
+        usernameConfirmation = { username, revision, promise };
+        return promise;
     }
 
     async function ensureConfirmedUser() {
@@ -386,11 +509,12 @@
     elements.username.addEventListener("input", () => {
         const value = elements.username.value;
         localStorage.setItem(USER_KEY, value);
-        confirmationVersion += 1;
+        usernameRevision += 1;
+        usernameConfirmation = null;
         confirmedUser = null;
         chats = [];
         activeChat = null;
-        pendingFiles = [];
+        invalidateChatRequests();
         setApiStatus("connecting", value.trim() ? "Waiting to confirm…" : "Enter a username");
         render();
         clearTimeout(usernameTimer);
