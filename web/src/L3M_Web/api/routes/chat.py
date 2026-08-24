@@ -132,17 +132,11 @@ async def add_message(
         for file in files:
             file_bytes = await file.read(MAX_FILE_BYTES + 1)
             if len(file_bytes) > MAX_FILE_BYTES:
-                raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=f"{file.filename or 'File'} exceeds the 10 MB limit",
-                )
+                raise HTTPException( status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=f"{file.filename or 'File'} exceeds the 10 MB limit" )
 
             total_bytes += len(file_bytes)
             if total_bytes > MAX_UPLOAD_BYTES:
-                raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail="Combined attachments exceed the 25 MB limit",
-                )
+                raise HTTPException( status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Combined attachments exceed the 25 MB limit")
 
             content_type = file.content_type or "application/octet-stream"
             attachments.append(
@@ -197,22 +191,12 @@ async def add_message(
     ollama_messages.append(current_message)
 
     if ollama_client is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Ollama is not available",
-        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Ollama is not available")
 
     try:
-        assistant_content = await generate_chat_response(
-            client=ollama_client,
-            model=settings.ollama_model,
-            messages=ollama_messages,
-        )
+        assistant_content = await generate_chat_response(client=ollama_client, model=settings.ollama_model, messages=ollama_messages )
     except OllamaGenerationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     exchange = await repository.add_exchange(
         user_id=user_id,
@@ -225,7 +209,4 @@ async def add_message(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
 
     user_message, assistant_message = exchange
-    return SendMessageResponse(
-        message=user_message,
-        generated_response=assistant_message,
-    )
+    return SendMessageResponse(message=user_message, generated_response=assistant_message )

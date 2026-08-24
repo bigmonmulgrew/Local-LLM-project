@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -302,7 +302,7 @@ class ChatRepository:
             return None
 
         user_created_at = utc_now()
-        assistant_created_at = utc_now()
+        assistant_created_at = user_created_at + timedelta(microseconds=1)
         user_message = MessageModel(
             id=str(uuid4()),
             chat_id=chat_id,
