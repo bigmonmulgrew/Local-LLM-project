@@ -1,0 +1,107 @@
+FOLDER STRUCTURE
+Root: C:\Git\Local-LLM-project\
+Excluded: .venv .git node_modules __pycache__ dist build
+Generated: 25/08/2026 10:09:04.01
+
+C:\Git\Local-LLM-project\\
++---ai\
+|   +---src\
+|   |   \---l3m_ai\
+|   |       +---main.py
+|   |       \---__init__.py
+|   +---tests\
+|   |   \---test_main.py
+|   +---.dockerignore
+|   +---Dockerfile
+|   +---pyproject.toml
+|   \---uv.lock
++---web\
+|   +---src\
+|   |   \---L3M_Web\
+|   |       +---api\
+|   |       |   +---models\
+|   |       |   |   +---chat.py
+|   |       |   |   \---__init__.py
+|   |       |   +---routes\
+|   |       |   |   +---chat.py
+|   |       |   |   +---health.py
+|   |       |   |   +---home.py
+|   |       |   |   +---users.py
+|   |       |   |   \---__init__.py
+|   |       |   +---services\
+|   |       |   |   +---attachment_storage.py
+|   |       |   |   +---ollama_chat.py
+|   |       |   |   \---__init__.py
+|   |       |   +---dependencies.py
+|   |       |   \---__init__.py
+|   |       +---config\
+|   |       |   +---logging.py
+|   |       |   +---settings.py
+|   |       |   +---summary.py
+|   |       |   +---validate.py
+|   |       |   \---__init__.py
+|   |       +---database\
+|   |       |   +---base.py
+|   |       |   +---chat_repository.py
+|   |       |   +---models.py
+|   |       |   \---__init__.py
+|   |       +---domain\
+|   |       |   +---attachments.py
+|   |       |   \---__init__.py
+|   |       +---infrastructure\
+|   |       |   +---database.py
+|   |       |   \---ollama.py
+|   |       +---static\
+|   |       |   +---css\
+|   |       |   |   \---styles.css
+|   |       |   +---images\
+|   |       |   |   +---favicons\
+|   |       |   |   |   +---apple-touch-icon-precomposed.png
+|   |       |   |   |   +---favicon.ico
+|   |       |   |   |   +---favicon_144.png
+|   |       |   |   |   \---favicon_96.png
+|   |       |   |   \---qr_code.png
+|   |       |   \---js\
+|   |       |       +---chat\
+|   |       |       |   +---api.js
+|   |       |       |   +---controller.js
+|   |       |       |   +---formatting.js
+|   |       |       |   \---view.js
+|   |       |       \---chat.js
+|   |       +---templates\
+|   |       |   +---common\
+|   |       |   |   \---favicons.html
+|   |       |   +---homepage\
+|   |       |   |   \---sidebar.html
+|   |       |   +---base.html
+|   |       |   \---home.html
+|   |       +---tests\
+|   |       |   +---frontend\
+|   |       |   |   +---api.test.mjs
+|   |       |   |   +---chat.integration.test.mjs
+|   |       |   |   +---controller.test.mjs
+|   |       |   |   +---formatting.test.mjs
+|   |       |   |   \---view.test.mjs
+|   |       |   \---test_attachment_storage.py
+|   |       +---app_factory.py
+|   |       +---lifespan.py
+|   |       +---main.py
+|   |       +---package.json
+|   |       +---test.py
+|   |       \---__init__.py
+|   +---tests\
+|   |   \---test_app.py
+|   +---.dockerignore
+|   +---Dockerfile
+|   +---pyproject.toml
+|   \---uv.lock
++---.env
++---.gitattributes
++---.gitignore
++---compose.yaml
++---Makefile
++---print _file _structure.bat
++---README.md
++---sample.env
++---update_env.bat
+\---update_env.sh
