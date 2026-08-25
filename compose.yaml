@@ -111,6 +111,15 @@ services:
       start_period: 15s
     networks:
       - backend
+## # Comment this section to disable GPU # ##
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+## # Comment this section to disable GPU # ##
 
 volumes:
   mysql-data:
