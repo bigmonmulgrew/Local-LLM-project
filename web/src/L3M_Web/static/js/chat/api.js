@@ -47,7 +47,7 @@
  * @property {(userId: string, title: string) => Promise<Chat>} createChat
  * @property {(userId: string, chatId: string, title: string) => Promise<Chat>} renameChat
  * @property {(userId: string, chatId: string) => Promise<null>} deleteChat
- * @property {(userId: string, chatId: string, message: {text: string, files?: File[]}) => Promise<unknown>} sendMessage
+ * @property {(userId: string, chatId: string, message: {text: string, files?: File[], model?: string, onDelta?: (content: string) => void}) => Promise<unknown>} sendMessage
  */
 
 /** Error returned for a non-successful API response. */
@@ -144,6 +144,93 @@ export function createChatApi(
         return response.json();
     }
 
+    /**
+     * Consume the backend's NDJSON events without assuming network chunks end
+     * on line boundaries.
+     *
+     * @param {string} path
+     * @param {RequestInit} options
+     * @param {(content: string) => void} onDelta
+     * @returns {Promise<any>}
+     */
+    async function requestStream(path, options, onDelta) {
+        const method = options.method || "GET";
+        const headers = new Headers(options.headers);
+        const response = await fetchImplementation(path, {
+            ...options,
+            headers
+        });
+        if (!response.ok) {
+            throw new ApiError({
+                method,
+                path,
+                status: response.status,
+                detail: await readErrorDetail(response)
+            });
+        }
+        if (!response.body) {
+            throw new ApiError({
+                method,
+                path,
+                status: 502,
+                detail: "The server returned an empty response stream"
+            });
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let completedResult = null;
+
+        const consumeLine = (line) => {
+            if (!line.trim()) return;
+            let event;
+            try {
+                event = JSON.parse(line);
+            } catch {
+                throw new ApiError({
+                    method,
+                    path,
+                    status: 502,
+                    detail: "The server returned an invalid response stream"
+                });
+            }
+
+            if (event.type === "delta" && typeof event.content === "string") {
+                onDelta(event.content);
+            } else if (event.type === "complete" && event.result) {
+                completedResult = event.result;
+            } else if (event.type === "error") {
+                throw new ApiError({
+                    method,
+                    path,
+                    status: Number(event.status) || 502,
+                    detail: String(event.detail || "Streaming request failed")
+                });
+            }
+        };
+
+        while (true) {
+            const { value, done } = await reader.read();
+            buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            lines.forEach(consumeLine);
+            if (done) break;
+        }
+        consumeLine(buffer);
+
+        if (!completedResult) {
+            throw new ApiError({
+                method,
+                path,
+                status: 502,
+                detail: "The response stream ended before the message was saved"
+            });
+        }
+        return completedResult;
+    }
+
     return Object.freeze({
         resolveUser(username) {
             return request("/api/users/resolve", {
@@ -180,17 +267,22 @@ export function createChatApi(
             });
         },
 
-        sendMessage(userId, chatId, { text, files = [] }) {
+        sendMessage(
+            userId,
+            chatId,
+            { text, files = [], model = "", onDelta = () => {} }
+        ) {
             const body = new FormData();
             body.append("user_id", userId);
             body.append("role", "user");
             body.append("text", text);
+            if (model) body.append("model", model);
             files.forEach((file) => body.append("files", file, file.name));
 
-            return request(`${chatPath(chatId)}/messages`, {
+            return requestStream(`${chatPath(chatId)}/messages`, {
                 method: "POST",
                 body
-            });
+            }, onDelta);
         }
     });
 }

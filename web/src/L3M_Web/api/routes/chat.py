@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from typing import Literal
 
 from fastapi import (
@@ -12,10 +14,12 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import StreamingResponse
 
 from L3M_Web.api.dependencies import (
     DatabaseSessionDependency,
     OllamaClientDependency,
+    OllamaModelsDependency,
     SettingsDependency,
 )
 from L3M_Web.api.models.chat import (
@@ -33,12 +37,22 @@ from L3M_Web.api.services.attachment_storage import (
 from L3M_Web.api.services.ollama_chat import (
     OllamaGenerationError,
     OllamaMessage,
-    generate_chat_response,
+    stream_chat_response,
 )
 from L3M_Web.database.chat_repository import ChatRepository
 from L3M_Web.domain.attachments import ConversationMessage, StoredAttachment
 
 router = APIRouter(prefix="/api/chats", tags=["chats"])
+logger = logging.getLogger(__name__)
+
+
+def stream_event(event_type: str, **payload: object) -> bytes:
+    """Encode one browser-facing newline-delimited JSON event."""
+
+    return (
+        json.dumps({"type": event_type, **payload}, separators=(",", ":"))
+        + "\n"
+    ).encode()
 
 
 def require_non_blank(value: str, field_name: str) -> str:
@@ -190,19 +204,20 @@ async def delete_chat(
 
 @router.post(
     "/{chat_id}/messages",
-    response_model=SendMessageResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def add_message(
     chat_id: str,
     session: DatabaseSessionDependency,
     ollama_client: OllamaClientDependency,
+    ollama_models: OllamaModelsDependency,
     settings: SettingsDependency,
     user_id: str = Form(min_length=36, max_length=36),
     role: Literal["user", "assistant"] = Form(default="user"),
     text: str = Form(default=""),
+    model: str | None = Form(default=None, max_length=200),
     files: list[UploadFile] = File(default=[]),
-) -> SendMessageResponse:
+) -> StreamingResponse:
     if not text.strip() and not files:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -221,84 +236,130 @@ async def add_message(
     pending_attachments = await prepare_attachments(storage, files, settings)
 
     stored_content = text.strip() or "Attached images"
-    if role == "assistant":
-        stored_attachments = await persist_attachments(
-            storage,
-            user_id,
-            chat_id,
-            pending_attachments,
+    selected_model = (model or settings.ollama_model).strip()
+    permitted_models = set(ollama_models)
+    if role == "user" and (
+        (permitted_models and selected_model not in permitted_models)
+        or (not permitted_models and selected_model != settings.ollama_model)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f'Model "{selected_model}" is not available',
         )
+
+    if role == "user":
+        ollama_messages = await build_ollama_history(storage, history)
+        current_message = OllamaMessage(role="user", content=stored_content)
+        if pending_attachments:
+            current_message["images"] = await storage.encode_pending(
+                pending_attachments
+            )
+        ollama_messages.append(current_message)
+
+        if ollama_client is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Ollama is not available",
+            )
+
+    async def generate_events():
+        stored_attachments: list[StoredAttachment] = []
         try:
-            message = await repository.add_message(
+            if role == "assistant":
+                stored_attachments = await persist_attachments(
+                    storage,
+                    user_id,
+                    chat_id,
+                    pending_attachments,
+                )
+                message = await repository.add_message(
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    role=role,
+                    content=stored_content,
+                    attachments=stored_attachments,
+                )
+                if message is None:
+                    await storage.delete(stored_attachments)
+                    yield stream_event(
+                        "error",
+                        status=status.HTTP_404_NOT_FOUND,
+                        detail="Chat not found",
+                    )
+                    return
+                result = SendMessageResponse(message=message)
+                yield stream_event(
+                    "complete",
+                    result=result.model_dump(mode="json"),
+                )
+                return
+
+            assistant_parts: list[str] = []
+            async for content_delta in stream_chat_response(
+                client=ollama_client,
+                model=selected_model,
+                messages=ollama_messages,
+            ):
+                assistant_parts.append(content_delta)
+                yield stream_event("delta", content=content_delta)
+
+            assistant_content = "".join(assistant_parts).strip()
+            stored_attachments = await persist_attachments(
+                storage,
+                user_id,
+                chat_id,
+                pending_attachments,
+            )
+            exchange = await repository.add_exchange(
                 user_id=user_id,
                 chat_id=chat_id,
-                role=role,
-                content=stored_content,
+                user_content=stored_content,
                 attachments=stored_attachments,
+                assistant_content=assistant_content,
+            )
+            if exchange is None:
+                await storage.delete(stored_attachments)
+                yield stream_event(
+                    "error",
+                    status=status.HTTP_404_NOT_FOUND,
+                    detail="Chat not found",
+                )
+                return
+
+            user_message, assistant_message = exchange
+            result = SendMessageResponse(
+                message=user_message,
+                generated_response=assistant_message,
+            )
+            yield stream_event(
+                "complete",
+                result=result.model_dump(mode="json"),
+            )
+        except OllamaGenerationError as exc:
+            yield stream_event(
+                "error",
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            )
+        except HTTPException as exc:
+            yield stream_event(
+                "error",
+                status=exc.status_code,
+                detail=str(exc.detail),
             )
         except Exception:
-            await storage.delete(stored_attachments)
-            raise
-        if message is None:
-            await storage.delete(stored_attachments)
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Chat not found",
+            logger.exception("Could not complete streamed chat exchange")
+            if stored_attachments:
+                await storage.delete(stored_attachments)
+            yield stream_event(
+                "error",
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not save the completed exchange",
             )
-        return SendMessageResponse(message=message)
 
-    ollama_messages = await build_ollama_history(storage, history)
-    current_message = OllamaMessage(role="user", content=stored_content)
-    if pending_attachments:
-        current_message["images"] = await storage.encode_pending(
-            pending_attachments
-        )
-    ollama_messages.append(current_message)
-
-    if ollama_client is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Ollama is not available",
-        )
-
-    try:
-        assistant_content = await generate_chat_response(
-            client=ollama_client,
-            model=settings.ollama_model,
-            messages=ollama_messages,
-        )
-    except OllamaGenerationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-
-    stored_attachments = await persist_attachments(
-        storage,
-        user_id,
-        chat_id,
-        pending_attachments,
-    )
-    try:
-        exchange = await repository.add_exchange(
-            user_id=user_id,
-            chat_id=chat_id,
-            user_content=stored_content,
-            attachments=stored_attachments,
-            assistant_content=assistant_content,
-        )
-    except Exception:
-        await storage.delete(stored_attachments)
-        raise
-    if exchange is None:
-        await storage.delete(stored_attachments)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat not found",
-        )
-
-    user_message, assistant_message = exchange
-    return SendMessageResponse(
-        message=user_message,
-        generated_response=assistant_message,
+    return StreamingResponse(
+        generate_events(),
+        status_code=status.HTTP_201_CREATED,
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

@@ -23,6 +23,9 @@ def get_db_engine(request: Request) -> AsyncEngine | None:
 def get_ollama_client(request: Request) -> httpx.AsyncClient | None:
     return getattr(request.app.state, "ollama_client", None)
 
+def get_ollama_models(request: Request) -> tuple[str, ...]:
+    return getattr(request.app.state, "ollama_models", ())
+
 async def get_db_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     session_factory: AsyncSessionFactory | None = getattr(
         request.app.state,
@@ -44,6 +47,7 @@ TemplatesDependency         = Annotated[Jinja2Templates, Depends(get_templates)]
 DatabaseEngineDependency    = Annotated[AsyncEngine | None, Depends(get_db_engine)]
 DatabaseSessionDependency   = Annotated[AsyncSession, Depends(get_db_session)]
 OllamaClientDependency      = Annotated[httpx.AsyncClient | None, Depends(get_ollama_client)]
+OllamaModelsDependency      = Annotated[tuple[str, ...], Depends(get_ollama_models)]
 
 # Transitional alias so existing health/home routes continue to work while
 # their argument names are updated from db_pool to db_engine.

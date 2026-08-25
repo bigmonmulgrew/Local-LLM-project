@@ -43,7 +43,19 @@
                 <h1 data-chat-title>New conversation</h1>
                 <p data-chat-meta>Start a conversation below</p>
             </div>
-            <span class="model-badge">{{ ollama_model or "Local model" }}</span>
+            <label class="sr-only" for="model-select">Ollama model</label>
+            <select class="model-select" id="model-select" data-model-select
+                    data-default-model="{{ ollama_model }}"
+                    aria-label="Ollama model">
+                {% if ollama_model not in ollama_models %}
+                    <option value="{{ ollama_model }}" selected>
+                        {{ ollama_model }}{% if ollama_models %} (not installed){% endif %}
+                    </option>
+                {% endif %}
+                {% for model in ollama_models %}
+                    <option value="{{ model }}"{% if model == ollama_model %} selected{% endif %}>{{ model }}</option>
+                {% endfor %}
+            </select>
         </header>
 
         <div class="messages" data-messages aria-live="polite" aria-label="Conversation history"></div>
@@ -57,19 +69,28 @@
 
                 <div class="composer-actions">
                     <div class="composer-tools">
-                        <input class="sr-only" id="file-input" type="file" multiple data-file-input>
+                        <input class="sr-only" id="file-input" type="file"
+                               accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                               multiple data-file-input>
                         <label class="icon-button" for="file-input" title="Attach files" aria-label="Attach files">
                             <span aria-hidden="true">＋</span>
                         </label>
-                        <span class="format-hint"><kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</span>
+                        <span class="format-hint" data-format-hint><kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</span>
                     </div>
-                    <button class="send-button" type="submit" aria-label="Send message" data-send-button>
-                        <span>Send</span>
-                        <span aria-hidden="true">↑</span>
-                    </button>
+                    <div class="send-controls">
+                        <button class="send-button" type="submit" aria-label="Send message" data-send-button>
+                            <span>Send</span>
+                            <span aria-hidden="true">↑</span>
+                        </button>
+                        <label class="enter-toggle">
+                            <input type="checkbox" checked data-enter-toggle>
+                            <span aria-hidden="true"></span>
+                            Enter sends
+                        </label>
+                    </div>
                 </div>
             </form>
-            <p class="composer-note">Supports **bold**, `inline code`, fenced code blocks, and &gt; quotes.</p>
+            <p class="composer-note">Supports headings, lists, **bold**, *italics*, links, quotes and code.</p>
         </div>
     </section>
 

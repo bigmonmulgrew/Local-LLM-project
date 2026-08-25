@@ -17,7 +17,11 @@ from L3M_Web.infrastructure.database import (
     create_session_factory,
     create_tables,
 )
-from L3M_Web.infrastructure.ollama import close_client, create_client
+from L3M_Web.infrastructure.ollama import (
+    close_client,
+    create_client,
+    list_ollama_models,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +42,20 @@ def create_lifespan(settings: Settings):
             await attachment_storage.ensure_root()
             ollama_client = create_client(settings)
 
+            # The installed-model list is intentionally a startup snapshot.
+            # Restarting the web service refreshes it after models are pulled
+            # or removed from Ollama.
+            ollama_models = await list_ollama_models(ollama_client)
+            if settings.ollama_model not in ollama_models:
+                logger.warning(
+                    "Configured Ollama model %s is not currently installed",
+                    settings.ollama_model,
+                )
+
             app.state.db_engine = db_engine
             app.state.db_session_factory = session_factory
             app.state.ollama_client = ollama_client
+            app.state.ollama_models = ollama_models
             yield
         finally:
             logger.info("Stopping %s", settings.app_name)

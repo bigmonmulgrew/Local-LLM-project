@@ -24,6 +24,10 @@ import {
  * @property {{id: string, title: string, updated_at: string, messages: Array<{id: string, role: "user"|"assistant", content: string, created_at: string, attachments?: Array<{name: string, size: number}>}>}|null} selectedChat
  * @property {File[]} draftAttachments
  * @property {boolean} isSendingMessage
+ * @property {boolean} enterToSend
+ * @property {string[]} availableModels
+ * @property {string} selectedModel
+ * @property {{chatId: string, userContent: string, attachments: File[], assistantContent: string, startedAt: string}|null} pendingExchange
  */
 
 /**
@@ -41,6 +45,9 @@ import {
  * @property {HTMLFormElement} composer
  * @property {HTMLTextAreaElement} messageInput
  * @property {HTMLButtonElement} sendButton
+ * @property {HTMLSelectElement} modelSelect
+ * @property {HTMLInputElement} enterToggle
+ * @property {HTMLElement} formatHint
  * @property {HTMLInputElement} fileInput
  * @property {HTMLElement} attachmentList
  * @property {HTMLButtonElement} menuButton
@@ -60,6 +67,9 @@ const ELEMENT_SELECTORS = Object.freeze({
     composer: "[data-composer]",
     messageInput: "[data-message-input]",
     sendButton: "[data-send-button]",
+    modelSelect: "[data-model-select]",
+    enterToggle: "[data-enter-toggle]",
+    formatHint: "[data-format-hint]",
     fileInput: "[data-file-input]",
     attachmentList: "[data-attachment-list]",
     menuButton: "[data-menu-button]",
@@ -166,7 +176,32 @@ export function createChatView(
     /** @param {ChatViewState} state @returns {void} */
     function renderConversation(state) {
         const chat = state.selectedChat;
-        if (!chat || chat.messages.length === 0) {
+        const pendingMessages = state.pendingExchange
+            && state.pendingExchange.chatId === chat?.id
+            ? [
+                {
+                    id: "pending-user",
+                    role: "user",
+                    content: state.pendingExchange.userContent,
+                    attachments: state.pendingExchange.attachments,
+                    created_at: state.pendingExchange.startedAt,
+                    isStreaming: true
+                },
+                {
+                    id: "pending-assistant",
+                    role: "assistant",
+                    content: state.pendingExchange.assistantContent,
+                    attachments: [],
+                    created_at: state.pendingExchange.startedAt,
+                    isStreaming: true
+                }
+            ]
+            : [];
+        const conversationMessages = [
+            ...(chat?.messages || []),
+            ...pendingMessages
+        ];
+        if (!chat || conversationMessages.length === 0) {
             elements.messageHistory.innerHTML = [
                 '<div class="welcome">',
                 '<div class="welcome-mark" aria-hidden="true">✦</div>',
@@ -176,7 +211,7 @@ export function createChatView(
                 "</div>"
             ].join("");
         } else {
-            const messages = chat.messages.map((message) => {
+            const messages = conversationMessages.map((message) => {
                 const article = rootDocument.createElement("article");
                 const isUser = message.role === "user";
                 const roleClass = isUser ? "user" : "assistant";
@@ -194,7 +229,11 @@ export function createChatView(
                     ].join(""))
                     .join("");
 
-                article.className = `message ${roleClass}`;
+                article.className = `message ${roleClass}${message.isStreaming ? " streaming" : ""}`;
+                const messageBody = message.isStreaming
+                    && !message.content
+                    ? '<span class="typing-indicator" aria-label="Generating response"><span></span><span></span><span></span></span>'
+                    : formatMessage(message.content);
                 article.innerHTML = [
                     `<div class="message-avatar" aria-hidden="true">${escapeHtml(avatar)}</div>`,
                     "<div>",
@@ -202,7 +241,7 @@ export function createChatView(
                     `<span class="message-author">${escapeHtml(author)}</span>`,
                     `<time class="message-time" datetime="${escapeHtml(message.created_at)}">${shortTime(message.created_at)}</time>`,
                     "</div>",
-                    `<div class="message-body">${formatMessage(message.content)}</div>`,
+                    `<div class="message-body">${messageBody}</div>`,
                     attachments
                         ? `<div class="message-attachments">${attachments}</div>`
                         : "",
@@ -246,6 +285,13 @@ export function createChatView(
                 !elements.messageInput.value.trim()
                 && state.draftAttachments.length === 0
             );
+        elements.enterToggle.checked = state.enterToSend;
+        elements.formatHint.innerHTML = state.enterToSend
+            ? '<kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line'
+            : '<kbd>Shift</kbd> + <kbd>Enter</kbd> to send';
+        if (state.selectedModel) {
+            elements.modelSelect.value = state.selectedModel;
+        }
     }
 
     /** @param {ChatViewState} state @returns {void} */
@@ -301,6 +347,16 @@ export function createChatView(
         return isOpen;
     }
 
+    /** @returns {{models: string[], defaultModel: string}} */
+    function getModelConfiguration() {
+        return {
+            models: Array.from(elements.modelSelect.options)
+                .map((option) => option.value)
+                .filter(Boolean),
+            defaultModel: elements.modelSelect.dataset.defaultModel || ""
+        };
+    }
+
     return Object.freeze({
         elements,
         render,
@@ -311,6 +367,7 @@ export function createChatView(
         clearFileInput,
         focusMessageInput,
         closeSidebar,
-        toggleSidebar
+        toggleSidebar,
+        getModelConfiguration
     });
 }

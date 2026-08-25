@@ -39,7 +39,25 @@ function createApi(overrides = {}) {
         },
         async renameChat() { throw new Error("Unexpected renameChat call"); },
         async deleteChat() { throw new Error("Unexpected deleteChat call"); },
-        async sendMessage() {},
+        async sendMessage(_userId, _chatId, { text, files, onDelta }) {
+            onDelta("Streamed reply");
+            return {
+                message: {
+                    id: "user-message",
+                    role: "user",
+                    content: text,
+                    attachments: files,
+                    created_at: "2026-08-24T10:00:00.000001"
+                },
+                generated_response: {
+                    id: "assistant-message",
+                    role: "assistant",
+                    content: "Streamed reply",
+                    attachments: [],
+                    created_at: "2026-08-24T10:00:00.000002"
+                }
+            };
+        },
         ...overrides
     };
 }
@@ -108,8 +126,8 @@ test("the most recently selected chat wins an out-of-order race", async () => {
 
 test("published state cannot mutate controller-owned attachment state", () => {
     const controller = createController(createApi());
-    const attachment = new File(["test"], "test.txt", {
-        type: "text/plain"
+    const attachment = new File(["test"], "test.png", {
+        type: "image/png"
     });
 
     controller.addDraftAttachments([attachment]);
@@ -121,41 +139,129 @@ test("published state cannot mutate controller-owned attachment state", () => {
     );
     assert.deepEqual(
         controller.getState().draftAttachments.map((file) => file.name),
-        ["test.txt"]
+        ["test.png"]
     );
 });
 
 test("a successful send removes only the submitted attachments", async () => {
     let releaseSend;
+    let sendStarted = false;
     let sentFiles = [];
     const sendGate = new Promise((resolve) => { releaseSend = resolve; });
     const controller = createController(createApi({
-        async sendMessage(_userId, _chatId, { files }) {
+        async sendMessage(_userId, _chatId, { text, files, onDelta }) {
             sentFiles = files;
+            onDelta("Working");
+            sendStarted = true;
             await sendGate;
+            return {
+                message: {
+                    id: "user-message",
+                    role: "user",
+                    content: text,
+                    attachments: files,
+                    created_at: "2026-08-24T10:00:00.000001"
+                },
+                generated_response: {
+                    id: "assistant-message",
+                    role: "assistant",
+                    content: "Working",
+                    attachments: [],
+                    created_at: "2026-08-24T10:00:00.000002"
+                }
+            };
         }
     }));
-    const firstFile = new File(["first"], "first.txt");
-    const laterFile = new File(["later"], "later.txt");
+    const firstFile = new File(["first"], "first.png", { type: "image/png" });
+    const laterFile = new File(["later"], "later.webp", { type: "image/webp" });
 
     controller.updateUsernameInput("Alice");
     await controller.resolveUsername();
     controller.addDraftAttachments([firstFile]);
     const sendPromise = controller.submitDraft("Hello");
-    while (!releaseSend) {
+    while (!sendStarted) {
         await new Promise((resolve) => setImmediate(resolve));
     }
+    assert.equal(
+        controller.getState().pendingExchange.assistantContent,
+        "Working"
+    );
     controller.addDraftAttachments([laterFile]);
     releaseSend();
 
     const result = await sendPromise;
     assert.equal(result.sent, true);
-    assert.deepEqual(sentFiles.map((file) => file.name), ["first.txt"]);
+    assert.deepEqual(sentFiles.map((file) => file.name), ["first.png"]);
     assert.deepEqual(
         controller.getState().draftAttachments.map((file) => file.name),
-        ["later.txt"]
+        ["later.webp"]
     );
     assert.equal(controller.getState().isSendingMessage, false);
+});
+
+test("a failed stream removes provisional messages and preserves the draft", async () => {
+    const controller = createController(createApi({
+        async sendMessage(_userId, _chatId, { onDelta }) {
+            onDelta("Partial response");
+            throw new Error("stream failed");
+        }
+    }));
+    const attachment = new File(["image"], "retry.png", {
+        type: "image/png"
+    });
+
+    controller.updateUsernameInput("Alice");
+    await controller.resolveUsername();
+    controller.addDraftAttachments([attachment]);
+    const result = await controller.submitDraft("Please inspect this");
+
+    assert.equal(result.sent, false);
+    assert.equal(controller.getState().pendingExchange, null);
+    assert.deepEqual(
+        controller.getState().draftAttachments.map((file) => file.name),
+        ["retry.png"]
+    );
+});
+
+test("unsupported draft files are rejected before submission", () => {
+    const statuses = [];
+    const { storage } = createStorage();
+    const controller = createChatController({
+        api: createApi(),
+        storage,
+        onStateChange() {},
+        onStatusChange: (...status) => statuses.push(status),
+        logger: { error() {} }
+    });
+
+    controller.addDraftAttachments([
+        new File(["text"], "notes.txt", { type: "text/plain" }),
+        new File(["image"], "photo.jpg", { type: "image/jpeg" })
+    ]);
+
+    assert.deepEqual(
+        controller.getState().draftAttachments.map((file) => file.name),
+        ["photo.jpg"]
+    );
+    assert.match(statuses.at(-1)[1], /JPEG, PNG and WebP/);
+});
+
+test("keyboard and model preferences are validated and persisted", () => {
+    const { storage, values } = createStorage();
+    const controller = createChatController({
+        api: createApi(),
+        storage,
+        initialModels: ["gemma3:4b", "llama3.2:3b"],
+        defaultModel: "gemma3:4b"
+    });
+
+    controller.updateEnterToSend(false);
+    assert.equal(controller.selectModel("llama3.2:3b"), true);
+    assert.equal(controller.selectModel("unknown"), false);
+    assert.equal(controller.getState().enterToSend, false);
+    assert.equal(controller.getState().selectedModel, "llama3.2:3b");
+    assert.equal(values.get("l3m-enter-to-send"), "false");
+    assert.equal(values.get("l3m-selected-model"), "llama3.2:3b");
 });
 
 test("typing resets the delayed username confirmation timer", () => {

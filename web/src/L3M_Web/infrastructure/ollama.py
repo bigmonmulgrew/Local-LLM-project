@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+
 import httpx
 
 from L3M_Web.config.settings import Settings
@@ -26,3 +27,22 @@ async def is_ollama_ready(client: httpx.AsyncClient | None) -> bool:
     except httpx.HTTPError:
         logger.warning("Ollama readiness check failed", exc_info=True)
         return False
+
+
+async def list_ollama_models(client: httpx.AsyncClient) -> tuple[str, ...]:
+    """Return the installed model names reported by Ollama."""
+
+    try:
+        response = await client.get("api/tags", timeout=5.0)
+        response.raise_for_status()
+        payload = response.json()
+        models = payload.get("models", [])
+        names = {
+            str(model.get("name") or model.get("model") or "").strip()
+            for model in models
+            if isinstance(model, dict)
+        }
+        return tuple(sorted(name for name in names if name))
+    except (httpx.HTTPError, TypeError, ValueError):
+        logger.warning("Could not load the Ollama model list", exc_info=True)
+        return ()

@@ -46,7 +46,7 @@
  * @property {(userId: string, title: string) => Promise<Chat>} createChat
  * @property {(userId: string, chatId: string, title: string) => Promise<Chat>} renameChat
  * @property {(userId: string, chatId: string) => Promise<unknown>} deleteChat
- * @property {(userId: string, chatId: string, message: {text: string, files: File[]}) => Promise<unknown>} sendMessage
+ * @property {(userId: string, chatId: string, message: {text: string, files: File[], model: string, onDelta: (content: string) => void}) => Promise<any>} sendMessage
  */
 
 /** @typedef {"connecting"|"ready"|"error"} ConnectionStatus */
@@ -61,6 +61,10 @@
  * @property {Readonly<Chat>|null} selectedChat
  * @property {ReadonlyArray<File>} draftAttachments
  * @property {boolean} isSendingMessage
+ * @property {boolean} enterToSend
+ * @property {ReadonlyArray<string>} availableModels
+ * @property {string} selectedModel
+ * @property {Readonly<{chatId: string, userContent: string, attachments: ReadonlyArray<File>, assistantContent: string, startedAt: string}>|null} pendingExchange
  */
 
 /**
@@ -73,6 +77,8 @@
  * @property {number} [usernameConfirmationDelay]
  * @property {typeof setTimeout} [setTimer]
  * @property {typeof clearTimeout} [clearTimer]
+ * @property {string[]} [initialModels]
+ * @property {string} [defaultModel]
  */
 
 /**
@@ -83,6 +89,13 @@
 
 const USERNAME_STORAGE_KEY = "l3m-chat-username";
 const LEGACY_CHAT_STORAGE_KEY = "l3m-chat-prototype-v1";
+const ENTER_TO_SEND_STORAGE_KEY = "l3m-enter-to-send";
+const MODEL_STORAGE_KEY = "l3m-selected-model";
+const ALLOWED_ATTACHMENT_TYPES = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp"
+]);
 
 /** @returns {void} */
 function noOperation() {}
@@ -121,23 +134,43 @@ export function createChatController({
     logger = globalThis.console,
     usernameConfirmationDelay = 5000,
     setTimer = globalThis.setTimeout,
-    clearTimer = globalThis.clearTimeout
+    clearTimer = globalThis.clearTimeout,
+    initialModels = [],
+    defaultModel = ""
 }) {
     if (!api) throw new TypeError("A chat API client is required");
 
     // Conversation data belongs to the server. The username is the only local
     // preference because it is needed to restore the user's view after reload.
     const savedUsername = storage.getItem(USERNAME_STORAGE_KEY) || "";
+    const savedModel = storage.getItem(MODEL_STORAGE_KEY) || "";
+    const configuredModels = [...new Set(
+        initialModels.map((model) => String(model).trim()).filter(Boolean)
+    )];
+    if (defaultModel && !configuredModels.includes(defaultModel)) {
+        configuredModels.unshift(defaultModel);
+    }
+    const selectedModel = configuredModels.includes(savedModel)
+        ? savedModel
+        : (
+            configuredModels.includes(defaultModel)
+                ? defaultModel
+                : configuredModels[0] || ""
+        );
     storage.removeItem(LEGACY_CHAT_STORAGE_KEY);
 
-    /** @type {{usernameInput: string, currentUser: User|null, chatSummaries: ChatSummary[], selectedChat: Chat|null, draftAttachments: File[], isSendingMessage: boolean}} */
+    /** @type {{usernameInput: string, currentUser: User|null, chatSummaries: ChatSummary[], selectedChat: Chat|null, draftAttachments: File[], isSendingMessage: boolean, enterToSend: boolean, availableModels: string[], selectedModel: string, pendingExchange: Object|null}} */
     const state = {
         usernameInput: savedUsername,
         currentUser: null,
         chatSummaries: [],
         selectedChat: null,
         draftAttachments: [],
-        isSendingMessage: false
+        isSendingMessage: false,
+        enterToSend: storage.getItem(ENTER_TO_SEND_STORAGE_KEY) !== "false",
+        availableModels: configuredModels,
+        selectedModel,
+        pendingExchange: null
     };
 
     /** @type {ReturnType<typeof setTimeout>|null} */
@@ -161,7 +194,16 @@ export function createChatController({
                 state.chatSummaries.map((chat) => freezeRecord(chat))
             ),
             selectedChat: freezeChat(state.selectedChat),
-            draftAttachments: Object.freeze([...state.draftAttachments])
+            draftAttachments: Object.freeze([...state.draftAttachments]),
+            availableModels: Object.freeze([...state.availableModels]),
+            pendingExchange: state.pendingExchange
+                ? Object.freeze({
+                    ...state.pendingExchange,
+                    attachments: Object.freeze([
+                        ...state.pendingExchange.attachments
+                    ])
+                })
+                : null
         });
     }
 
@@ -427,6 +469,25 @@ export function createChatController({
         }
     }
 
+    /** @param {boolean} value @returns {void} */
+    function updateEnterToSend(value) {
+        state.enterToSend = Boolean(value);
+        storage.setItem(
+            ENTER_TO_SEND_STORAGE_KEY,
+            String(state.enterToSend)
+        );
+        publishState();
+    }
+
+    /** @param {string} model @returns {boolean} */
+    function selectModel(model) {
+        if (!state.availableModels.includes(model)) return false;
+        state.selectedModel = model;
+        storage.setItem(MODEL_STORAGE_KEY, model);
+        publishState();
+        return true;
+    }
+
     /** @param {string} draftText @returns {Promise<SubmitDraftResult>} */
     async function submitDraft(draftText) {
         const content = draftText.trim();
@@ -459,16 +520,59 @@ export function createChatController({
             }
 
             const targetChatId = targetChat.id;
+            const selectedModel = state.selectedModel;
+            state.pendingExchange = {
+                chatId: targetChatId,
+                userContent: content || "Attached images",
+                attachments: submittedFiles,
+                assistantContent: "",
+                startedAt: new Date().toISOString()
+            };
+            publishState();
             publishStatus("connecting", "Ollama is responding…");
-            await api.sendMessage(user.id, targetChatId, {
+            const completedExchange = await api.sendMessage(
+                user.id,
+                targetChatId,
+                {
                 text: content,
-                files: submittedFiles
+                files: submittedFiles,
+                model: selectedModel,
+                onDelta(contentDelta) {
+                    if (
+                        state.pendingExchange?.chatId !== targetChatId
+                        || state.currentUser?.id !== user.id
+                    ) {
+                        return;
+                    }
+                    state.pendingExchange.assistantContent += contentDelta;
+                    publishState();
+                }
             });
 
             // Remove only the attachments included in this successful request.
             state.draftAttachments = state.draftAttachments.filter(
                 (file) => !submittedFiles.includes(file)
             );
+            if (
+                state.currentUser?.id === user.id
+                && state.selectedChat?.id === targetChatId
+            ) {
+                const completedMessages = [
+                    completedExchange.message,
+                    completedExchange.generated_response
+                ].filter(Boolean);
+                state.selectedChat = {
+                    ...state.selectedChat,
+                    messages: [
+                        ...(state.selectedChat.messages || []),
+                        ...completedMessages
+                    ],
+                    updated_at: completedMessages.at(-1)?.created_at
+                        || state.selectedChat.updated_at
+                };
+            }
+            state.pendingExchange = null;
+            publishState();
 
             try {
                 const listRequestVersion = ++chatListRequestVersion;
@@ -496,6 +600,7 @@ export function createChatController({
 
             return { sent: true, submittedText: draftText };
         } catch (error) {
+            state.pendingExchange = null;
             if (
                 submittedUserId === null
                 || state.currentUser?.id === submittedUserId
@@ -522,7 +627,20 @@ export function createChatController({
 
     /** @param {FileList|File[]} files @returns {void} */
     function addDraftAttachments(files) {
-        state.draftAttachments.push(...Array.from(files));
+        const selectedFiles = Array.from(files);
+        const allowedFiles = selectedFiles.filter(
+            (file) => ALLOWED_ATTACHMENT_TYPES.has(file.type)
+        );
+        const rejectedFiles = selectedFiles.filter(
+            (file) => !ALLOWED_ATTACHMENT_TYPES.has(file.type)
+        );
+        state.draftAttachments.push(...allowedFiles);
+        if (rejectedFiles.length) {
+            publishStatus(
+                "error",
+                "Only JPEG, PNG and WebP images can be attached"
+            );
+        }
         publishState();
     }
 
@@ -549,6 +667,8 @@ export function createChatController({
         selectChat,
         renameChat,
         deleteChat,
+        updateEnterToSend,
+        selectModel,
         submitDraft,
         showNewChat,
         addDraftAttachments,

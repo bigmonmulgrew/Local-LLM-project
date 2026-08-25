@@ -12,6 +12,8 @@ class FakeElement {
         this.listeners = new Map();
         this.value = "";
         this.files = [];
+        this.options = [];
+        this.checked = true;
         this.dataset = {};
         this.style = {};
         this.innerHTML = "";
@@ -55,6 +57,16 @@ function jsonResponse(body, status = 200) {
     });
 }
 
+function streamResponse(events) {
+    return new Response(
+        events.map((event) => JSON.stringify(event)).join("\n") + "\n",
+        {
+            status: 201,
+            headers: { "Content-Type": "application/x-ndjson" }
+        }
+    );
+}
+
 function chatRecord(id, title, messages = []) {
     return {
         id,
@@ -79,6 +91,10 @@ function chatClickTarget(chatId) {
 }
 
 test("blur plus Send resolves once, preserves files and ignores stale chat", async () => {
+    const modelSelect = new FakeElement();
+    modelSelect.options = [{ value: "gemma3:4b" }];
+    modelSelect.value = "gemma3:4b";
+    modelSelect.dataset.defaultModel = "gemma3:4b";
     const selectors = new Map([
         ["[data-chat-app]", new FakeElement()],
         ["#username", new FakeElement()],
@@ -91,6 +107,9 @@ test("blur plus Send resolves once, preserves files and ignores stale chat", asy
         ["[data-composer]", new FakeElement()],
         ["[data-message-input]", new FakeElement()],
         ["[data-send-button]", new FakeElement()],
+        ["[data-model-select]", modelSelect],
+        ["[data-enter-toggle]", new FakeElement()],
+        ["[data-format-hint]", new FakeElement()],
         ["[data-file-input]", new FakeElement()],
         ["[data-attachment-list]", new FakeElement()],
         ["[data-menu-button]", new FakeElement()],
@@ -116,7 +135,28 @@ test("blur plus Send resolves once, preserves files and ignores stale chat", asy
         if (path.includes("/messages") && method === "POST") {
             messageRequests += 1;
             submittedFileCount = options.body.getAll("files").length;
-            return jsonResponse({});
+            return streamResponse([
+                { type: "delta", content: "Hi" },
+                {
+                    type: "complete",
+                    result: {
+                        message: {
+                            id: "message-1",
+                            role: "user",
+                            content: "Hello",
+                            attachments: [],
+                            created_at: "2026-08-24T10:00:00.000000"
+                        },
+                        generated_response: {
+                            id: "message-2",
+                            role: "assistant",
+                            content: "Hi",
+                            attachments: [],
+                            created_at: "2026-08-24T10:00:00.000001"
+                        }
+                    }
+                }
+            ]);
         }
         if (path.startsWith("/api/chats/chat-a")) {
             await new Promise((resolve) => setTimeout(resolve, 30));
@@ -150,6 +190,7 @@ test("blur plus Send resolves once, preserves files and ignores stale chat", asy
         window: {
             prompt: () => null,
             alert() {},
+            confirm: () => true,
             addEventListener() {}
         },
         localStorage: {
@@ -197,7 +238,9 @@ test("blur plus Send resolves once, preserves files and ignores stale chat", asy
     usernameInput.value = "Alice";
     usernameInput.dispatch("input");
     messageInput.value = "Hello";
-    fileInput.files = [new File(["test"], "test.txt")];
+    fileInput.files = [new File(["test"], "test.png", {
+        type: "image/png"
+    })];
     fileInput.dispatch("change");
 
     // Clicking Send moves focus first, so blur and submit occur back-to-back.

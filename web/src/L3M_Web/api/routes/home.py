@@ -32,6 +32,7 @@ async def home(
         context={
             "app_name": settings.app_name,
             "ollama_model": settings.ollama_model,
+            "ollama_models": getattr(request.app.state, "ollama_models", ()),
             "mysql": {
                 "label": ( "Ready" if mysql_ready else "Unavailable" ),
                 "css_class": ( "ok" if mysql_ready else "warn" )
