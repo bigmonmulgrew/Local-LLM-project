@@ -18,12 +18,15 @@ const api = createChatApi();
     const view = createChatView();
     if (!view) return;
     const { elements } = view;
+    const modelConfiguration = view.getModelConfiguration();
 
     const controller = createChatController({
         api,
         storage: localStorage,
         onStateChange: view.render,
-        onStatusChange: view.renderStatus
+        onStatusChange: view.renderStatus,
+        initialModels: modelConfiguration.models,
+        defaultModel: modelConfiguration.defaultModel
     });
 
     /** Submit the current DOM draft and clear only the values actually sent. */
@@ -108,7 +111,14 @@ const api = createChatApi();
         const deleteButton = closestEventTarget(event, "[data-delete-chat]");
         if (deleteButton) {
             event.stopPropagation();
-            void controller.deleteChat(deleteButton.dataset.deleteChat);
+            const chatId = deleteButton.dataset.deleteChat;
+            const chat = controller.getState().chatSummaries.find(
+                (item) => item.id === chatId
+            );
+            const title = chat?.title || "this conversation";
+            if (window.confirm(`Delete "${title}"? This cannot be undone.`)) {
+                void controller.deleteChat(chatId);
+            }
             return;
         }
 
@@ -141,13 +151,26 @@ const api = createChatApi();
 
     /** @param {KeyboardEvent} event */
     function handleMessageKeydown(event) {
-        if (event.key !== "Enter" || event.shiftKey) return;
+        if (event.key !== "Enter" || event.isComposing) return;
+        const { enterToSend } = controller.getState();
+        const shouldSend = enterToSend ? !event.shiftKey : event.shiftKey;
+        if (!shouldSend) return;
         event.preventDefault();
         void submitCurrentDraft();
     }
 
     function handleFileSelection() {
         controller.addDraftAttachments(elements.fileInput.files);
+        view.clearFileInput();
+    }
+
+    function handleEnterToggleChange() {
+        controller.updateEnterToSend(elements.enterToggle.checked);
+        view.focusMessageInput();
+    }
+
+    function handleModelSelection() {
+        controller.selectModel(elements.modelSelect.value);
     }
 
     /** @param {MouseEvent} event */
@@ -180,6 +203,11 @@ const api = createChatApi();
         elements.messageInput.addEventListener("input", handleMessageInput);
         elements.messageInput.addEventListener("keydown", handleMessageKeydown);
         elements.fileInput.addEventListener("change", handleFileSelection);
+        elements.enterToggle.addEventListener(
+            "change",
+            handleEnterToggleChange
+        );
+        elements.modelSelect.addEventListener("change", handleModelSelection);
         elements.attachmentList.addEventListener(
             "click",
             handleAttachmentListClick
