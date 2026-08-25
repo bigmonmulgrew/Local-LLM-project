@@ -10,7 +10,7 @@ services:
     env_file:
       - .env
     environment:
-      OLLAMA_BASE_URL: "http://ollama:${OLLAMA_PORT:?Set OLLAMA_PORT in .env}"
+      OLLAMA_BASE_URL: "http://ai:${AI_PORT:-8020}"
     ports:
       - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8000}:8000"
     volumes:
@@ -18,7 +18,7 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      ollama:
+      ai:
         condition: service_healthy
     healthcheck:
       test:
@@ -43,16 +43,21 @@ services:
       - .env
     environment:
       OLLAMA_BASE_URL: "http://ollama:${OLLAMA_PORT:?Set OLLAMA_PORT in .env}"
+      AI_PORT: "${AI_PORT:-8020}"
+    expose:
+      - "${AI_PORT:-8020}"
     depends_on:
-      mysql:
-        condition: service_healthy
       ollama:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "test", "-f", "/tmp/ai-ready"]
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - "import os, urllib.request; port = os.getenv('AI_PORT', '8020'); urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=2)"
       interval: 10s
       timeout: 3s
-      retries: 3
+      retries: 5
       start_period: 5s
     networks:
       - backend

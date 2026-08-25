@@ -7,7 +7,12 @@ name = "l3m-ai"
 version = "0.1.0"
 description = "AI backend for L3M package"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi>=0.116,<1",
+    "httpx>=0.28,<1",
+    "pydantic-settings>=2.10,<3",
+    "uvicorn>=0.35,<1",
+]
 
 [project.scripts]
 l3m-ai = "l3m_ai.main:main"
