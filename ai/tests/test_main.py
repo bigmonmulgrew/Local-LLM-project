@@ -5,7 +5,8 @@ import logging
 
 import httpx
 
-from l3m_ai.main import Settings, create_app
+from l3m_ai.app_factory import create_app
+from l3m_ai.settings import Settings
 
 
 class AsyncBytes(httpx.AsyncByteStream):

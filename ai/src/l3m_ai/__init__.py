@@ -1,1 +1,1 @@
-"""Placeholder package for L3M AI backend."""
+"""Ollama-compatible AI proxy for L3M."""

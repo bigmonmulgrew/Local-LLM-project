@@ -2,15 +2,14 @@
 
 The goal of this project is to enable a quick setup of a local LLM wrapping it into a locally hosted web interface allowing for flexible deployment or sharing without requiring installation on every machine.
 
-The project MVP stack includesh:
+The project MVP stack includes:
 
-- An AI chatbot chatbot web application
-- FastAPI to test endpoints;
-- MySQL databse;
-- Ollama with persistent model storage;
-- modern Python packaging through `pyproject.toml`, `uv`, and checked-in lockfiles.
-- a lifecycle-aware Python AI placeholder app;
-- automated setup
+- A FastAPI chatbot web application
+- MySQL with phpMyAdmin
+- Ollama with persistent model storage
+- A lifecycle-aware AI proxy that preserves Ollama's HTTP contracts
+- Modern Python packaging through `pyproject.toml`, `uv`, and checked-in lockfiles
+- Automated setup
 
 ## Requirements
 
@@ -26,10 +25,10 @@ This repo contains a script that will automatically sync sample.env with .env, a
 - Changed variables in .env will be preserved.
 - Variables are sorted to match the sample.env ordering.
 - Variables in .env that don't exist in sample.env are sorted to the end.
-- Scrip log highlights any new variables as well as any that don't exist in sample.env
+- Script output highlights any new variables as well as any that don't exist in sample.env
 - It will scan for and sync any files ending in .env
 
-## Setup instrucitons
+## Setup instructions
 
 1. Copy the sample.env file, you can do this manually or use the bundled update script
 2. Build the stack
@@ -51,10 +50,17 @@ Setting this external allows sharing models, these are not deleted when deleting
 ### Test setup
 Open <http://localhost:8000>. The homepage reports whether MySQL and Ollama are reachable.
 
-The AI placeholder stays alive, handles `SIGTERM`/`SIGINT`, and writes `helllo world` once during startup:
+The web service sends Ollama requests through the AI service at `ai:8020`. The AI service currently forwards them unchanged and writes one short request summary to its console:
 
 ```bash
 docker compose logs ai
+```
+
+Example output:
+
+```text
+POST /api/chat -> 200 chat-valid 1843ms
+GET /api/tags -> 200 passthrough 8ms
 ```
 
 Ollama starts without downloading a model. Pull the sample model when you are ready:
@@ -80,13 +86,27 @@ make logs
 | `GET /readyz` | MySQL and Ollama readiness; returns HTTP 503 if either is unavailable |
 | `GET /docs` | Interactive OpenAPI documentation |
 
+The AI service reserves `GET /healthz` for its container health check. Its explicit `POST /api/chat` route validates requests only to decide whether future AI processing can be applied; invalid or unfamiliar chat bodies are still sent to Ollama unchanged. Every other supported HTTP method and path is transparently forwarded to the configured Ollama server, including streaming responses.
+
+### AI service layout
+
+The AI package stays deliberately small while following the same broad factory pattern as the web application:
+
+| File | Responsibility |
+| --- | --- |
+| `main.py` | Creates settings and the app, then starts Uvicorn |
+| `settings.py` | Environment-backed AI settings |
+| `app_factory.py` | FastAPI construction and shared HTTP client lifecycle |
+| `routes.py` | Health, chat validation, processing extension point and catch-all routes |
+| `proxy.py` | Contract-preserving forwarding, streaming and request summaries |
+
 MySQL and Ollama bind to `127.0.0.1` by default; only the web service binds to all interfaces. Change the matching `*_BIND_ADDRESS` value in `.env` only if you require remote access.
 
 ## Lifecycle and data
 
-- Compose waits for MySQL and Ollama health checks before starting the Python services.
+- Compose starts Ollama before the AI proxy, and starts the web service after MySQL and the AI proxy are healthy.
 - The web app creates its MySQL connection pool on startup and closes it on shutdown.
-- The AI placeholder creates its readiness marker at startup and removes it on shutdown.
+- The AI proxy creates one reusable HTTP client on startup and closes it during graceful shutdown.
 - `restart: unless-stopped` restarts failed services after Docker is running again.
 - MySQL data and Ollama models live in named volumes.
 
@@ -119,6 +139,6 @@ docker compose config --quiet
 
 ## Production notes
 
-This is an MVP teamplate project. It is not intended for production use without significant extension.
+This is an MVP template project. It is not intended for production use without significant extension.
 
 Do not commit `.env`; it is ignored by Git.

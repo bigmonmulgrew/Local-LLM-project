@@ -7,7 +7,11 @@ C:\Git\Local-LLM-project\\
 +---ai\
 |   +---src\
 |   |   \---l3m_ai\
+|   |       +---app_factory.py
 |   |       +---main.py
+|   |       +---proxy.py
+|   |       +---routes.py
+|   |       +---settings.py
 |   |       \---__init__.py
 |   +---tests\
 |   |   \---test_main.py
