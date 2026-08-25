@@ -1,0 +1,1 @@
+"""Domain records shared across application layers."""

@@ -24,6 +24,7 @@ class FileObject(BaseModel):
     name: str
     content_type: str
     size: int = Field(ge=0)
+    sha256: str = Field(min_length=64, max_length=64)
 
 
 class Message(BaseModel):

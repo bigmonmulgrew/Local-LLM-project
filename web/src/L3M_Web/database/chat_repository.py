@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -22,6 +22,7 @@ from L3M_Web.database.models import (
     MessageModel,
     UserModel,
 )
+from L3M_Web.domain.attachments import ConversationMessage, StoredAttachment
 
 
 def utc_now() -> datetime:
@@ -35,6 +36,29 @@ def file_to_schema(file: MessageFileModel) -> FileObject:
         name=file.name,
         content_type=file.content_type,
         size=file.size_bytes,
+        sha256=file.sha256,
+    )
+
+
+def stored_file_to_schema(file: StoredAttachment) -> FileObject:
+    return FileObject(
+        id=file.id,
+        name=file.name,
+        content_type=file.content_type,
+        size=file.size,
+        sha256=file.sha256,
+    )
+
+
+def file_to_domain(file: MessageFileModel) -> StoredAttachment:
+    return StoredAttachment(
+        id=file.id,
+        name=file.name,
+        stored_name=file.stored_name,
+        content_type=file.content_type,
+        size=file.size_bytes,
+        sha256=file.sha256,
+        storage_path=file.storage_path,
     )
 
 
@@ -167,6 +191,44 @@ class ChatRepository:
         await self._session.commit()
         return result
 
+    async def get_generation_history(
+        self,
+        user_id: str,
+        chat_id: str,
+    ) -> list[ConversationMessage] | None:
+        """Return ordered messages with the storage metadata Ollama needs."""
+
+        chat_exists = await self._session.scalar(
+            select(ChatModel.id).where(
+                ChatModel.id == chat_id,
+                ChatModel.user_id == user_id,
+            )
+        )
+        if chat_exists is None:
+            await self._session.commit()
+            return None
+
+        statement = (
+            select(MessageModel)
+            .where(MessageModel.chat_id == chat_id)
+            .options(selectinload(MessageModel.attachments))
+            .order_by(MessageModel.created_at)
+        )
+        messages = (await self._session.scalars(statement)).all()
+        history = [
+            ConversationMessage(
+                role=message.role,
+                content=message.content,
+                attachments=tuple(
+                    file_to_domain(file)
+                    for file in message.attachments
+                ),
+            )
+            for message in messages
+        ]
+        await self._session.commit()
+        return history
+
     async def create_chat(self, user_id: str, title: str) -> Chat | None:
         user = await self._session.get(UserModel, user_id)
         if user is None:
@@ -233,12 +295,15 @@ class ChatRepository:
         return True
 
     @staticmethod
-    def build_attachment(file: FileObject) -> MessageFileModel:
+    def build_attachment(file: StoredAttachment) -> MessageFileModel:
         return MessageFileModel(
             id=file.id,
             name=file.name,
+            stored_name=file.stored_name,
             content_type=file.content_type,
             size_bytes=file.size,
+            sha256=file.sha256,
+            storage_path=file.storage_path,
             created_at=utc_now(),
         )
 
@@ -248,7 +313,7 @@ class ChatRepository:
         chat_id: str,
         role: MessageRole,
         content: str,
-        attachments: list[FileObject],
+        attachments: list[StoredAttachment],
     ) -> Message | None:
         statement = (
             select(ChatModel)
@@ -279,7 +344,7 @@ class ChatRepository:
             id=message.id,
             role=role,
             content=message.content,
-            attachments=attachments,
+            attachments=[stored_file_to_schema(file) for file in attachments],
             created_at=message.created_at,
         )
 
@@ -288,7 +353,7 @@ class ChatRepository:
         user_id: str,
         chat_id: str,
         user_content: str,
-        attachments: list[FileObject],
+        attachments: list[StoredAttachment],
         assistant_content: str,
     ) -> tuple[Message, Message] | None:
         statement = (
@@ -330,7 +395,10 @@ class ChatRepository:
                 id=user_message.id,
                 role="user",
                 content=user_message.content,
-                attachments=attachments,
+                attachments=[
+                    stored_file_to_schema(file)
+                    for file in attachments
+                ],
                 created_at=user_message.created_at,
             ),
             Message(

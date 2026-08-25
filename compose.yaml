@@ -13,6 +13,8 @@ services:
       OLLAMA_BASE_URL: "http://ollama:${OLLAMA_PORT:?Set OLLAMA_PORT in .env}"
     ports:
       - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8000}:8000"
+    volumes:
+      - chat-uploads:${UPLOAD_DIRECTORY:-/app/data/uploads}
     depends_on:
       mysql:
         condition: service_healthy
@@ -95,7 +97,7 @@ services:
     image: ollama/ollama:latest
     restart: unless-stopped
     environment:
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:1b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
       OLLAMA_HOST: "0.0.0.0:${OLLAMA_PORT:?Set OLLAMA_PORT in .env}"
     ports:
       - "${OLLAMA_BIND_ADDRESS:-127.0.0.1}:${OLLAMA_PORT:?Set OLLAMA_PORT in .env}:${OLLAMA_PORT:?Set OLLAMA_PORT in .env}"
@@ -113,7 +115,9 @@ services:
 volumes:
   mysql-data:
   ollama-data:
+  chat-uploads:
 
 networks:
   backend:
     driver: bridge
+    

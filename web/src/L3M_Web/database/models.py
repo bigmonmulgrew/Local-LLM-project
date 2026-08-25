@@ -117,8 +117,15 @@ class MessageFileModel(Base):
         nullable=False,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(100), nullable=False)
     content_type: Mapped[str] = mapped_column(String(255), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BIGINT(unsigned=True), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_path: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        unique=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DATETIME(fsp=6),
         nullable=False,

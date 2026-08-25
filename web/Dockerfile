@@ -20,6 +20,12 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app
+
+
+USER root
+RUN mkdir -p /app/data/uploads \
+    && chown -R app:app /app/data
+
 WORKDIR /app
 COPY --from=builder --chown=app:app /app /app
 USER app

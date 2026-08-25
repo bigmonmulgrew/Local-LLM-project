@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Literal, NotRequired, TypedDict
 
 import httpx
 
@@ -9,10 +9,18 @@ class OllamaGenerationError(RuntimeError):
     """Raised when Ollama cannot return a usable assistant message."""
 
 
+class OllamaMessage(TypedDict):
+    """One message in Ollama's native chat request format."""
+
+    role: Literal["user", "assistant"]
+    content: str
+    images: NotRequired[list[str]]
+
+
 async def generate_chat_response(
     client: httpx.AsyncClient,
     model: str,
-    messages: list[dict[str, Any]],
+    messages: list[OllamaMessage],
 ) -> str:
     try:
         response = await client.post(

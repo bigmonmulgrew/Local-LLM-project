@@ -8,6 +8,7 @@ import httpx
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from L3M_Web.api.services.attachment_storage import AttachmentStorage
 from L3M_Web.config.settings import Settings
 from L3M_Web.infrastructure.database import (
     AsyncSessionFactory,
@@ -33,6 +34,8 @@ def create_lifespan(settings: Settings):
             db_engine = create_database_engine(settings)
             session_factory = create_session_factory(db_engine)
             await create_tables(db_engine)
+            attachment_storage = AttachmentStorage(settings.upload_directory)
+            await attachment_storage.ensure_root()
             ollama_client = create_client(settings)
 
             app.state.db_engine = db_engine
