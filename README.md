@@ -114,9 +114,7 @@ MYSQL_ROOT_PASSWORD=choose-a-different-root-password
 
 Do not commit `.env`. It is ignored by Git because it can contain machine-specific values and secrets.
 
-<style>span{color:Blue;}</style>
-
-If you run the updater in the future it will sync any new values from <span>sample.env</span> while preserving the contents of .env
+If you run the updater in the future it will sync any new values from sample.env while preserving the contents of .env
 
 ### 2. Start the stack
 
