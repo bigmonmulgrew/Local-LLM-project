@@ -1,4 +1,4 @@
-# L3M: Local Large Language Model PRoject Template
+# L3M: Local Large Language Model Project Template
 
 L3M is a Docker-based quickstart for building local AI tools.
 
