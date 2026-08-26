@@ -1,1 +1,34 @@
-placeholder
+cff-version: 1.2.0
+message: >-
+  If you use L3M in academic work, research, teaching, or a publication,
+  please cite the project using the information below.
+
+title: "L3M"
+abstract: >-
+  L3M is a template and quick-start project for building containerised
+  AI tools with a production-oriented architecture.
+
+type: software
+version: "0.1.0"
+date-released: "2026-08-26"
+
+authors:
+  - family-names: "Mulgrew
+    given-names: "David"
+    orcid: "https://orcid.org/0009-0006-8470-7602"
+
+repository-code: "https://github.com/bigmonmulgrew/Local-LLM-project"
+url: "https://github.com/bigmonmulgrew/Local-LLM-project"
+
+license: "PolyForm-Noncommercial-1.0.0"
+
+keywords:
+  - artificial intelligence
+  - large language models
+  - Ollama
+  - Docker
+  - Python
+  - FastAPI
+  - AI template
+  - self-hosted AI
+  - local
