@@ -58,10 +58,7 @@ def stream_event(event_type: str, **payload: object) -> bytes:
 def require_non_blank(value: str, field_name: str) -> str:
     cleaned = value.strip()
     if not cleaned:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"{field_name} cannot be blank",
-        )
+        raise HTTPException( status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{field_name} cannot be blank" )
     return cleaned
 
 
@@ -96,23 +93,14 @@ async def persist_attachments(
     except AttachmentError as exc:
         raise attachment_http_exception(exc) from exc
     except OSError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not store the uploaded files",
-        ) from exc
+        raise HTTPException( status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not store the uploaded files" ) from exc
 
 
-async def build_ollama_history(
-    storage: AttachmentStorage,
-    history: list[ConversationMessage],
-) -> list[OllamaMessage]:
+async def build_ollama_history( storage: AttachmentStorage, history: list[ConversationMessage] ) -> list[OllamaMessage]:
     messages: list[OllamaMessage] = []
     try:
         for message in history:
-            ollama_message = OllamaMessage(
-                role=message.role,
-                content=message.content,
-            )
+            ollama_message = OllamaMessage( role=message.role, content=message.content )
             if message.attachments:
                 ollama_message["images"] = await storage.encode_stored(
                     message.attachments
@@ -124,27 +112,18 @@ async def build_ollama_history(
 
 
 @router.get("", response_model=list[ChatSummary])
-async def list_chats(
-    session: DatabaseSessionDependency,
-    user_id: str = Query(min_length=36, max_length=36),
-) -> list[ChatSummary]:
+async def list_chats(session: DatabaseSessionDependency, user_id: str = Query(min_length=36, max_length=36) ) -> list[ChatSummary]:
     return await ChatRepository(session).list_chats(user_id)
 
 
 @router.post("", response_model=Chat, status_code=status.HTTP_201_CREATED)
-async def create_chat(
-    payload: CreateChatRequest,
-    session: DatabaseSessionDependency,
-) -> Chat:
+async def create_chat( payload: CreateChatRequest, session: DatabaseSessionDependency ) -> Chat:
     chat = await ChatRepository(session).create_chat(
         payload.user_id,
         require_non_blank(payload.title, "title"),
     )
     if chat is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
+        raise HTTPException( status_code=status.HTTP_404_NOT_FOUND, detail="User not found" )
     return chat
 
 
@@ -156,10 +135,7 @@ async def get_chat(
 ) -> Chat:
     chat = await ChatRepository(session).get_chat(user_id, chat_id)
     if chat is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat not found",
-        )
+        raise HTTPException( status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found" )
     return chat
 
 
@@ -202,10 +178,7 @@ async def delete_chat(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post(
-    "/{chat_id}/messages",
-    status_code=status.HTTP_201_CREATED,
-)
+@router.post( "/{chat_id}/messages", status_code=status.HTTP_201_CREATED )
 async def add_message(
     chat_id: str,
     session: DatabaseSessionDependency,
@@ -219,18 +192,12 @@ async def add_message(
     files: list[UploadFile] = File(default=[]),
 ) -> StreamingResponse:
     if not text.strip() and not files:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="A message requires text or at least one file",
-        )
+        raise HTTPException( status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A message requires text or at least one file" )
 
     repository = ChatRepository(session)
     history = await repository.get_generation_history(user_id, chat_id)
     if history is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat not found",
-        )
+        raise HTTPException( status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found" )
 
     storage = AttachmentStorage(settings.upload_directory)
     pending_attachments = await prepare_attachments(storage, files, settings)
@@ -242,10 +209,7 @@ async def add_message(
         (permitted_models and selected_model not in permitted_models)
         or (not permitted_models and selected_model != settings.ollama_model)
     ):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f'Model "{selected_model}" is not available',
-        )
+        raise HTTPException( status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f'Model "{selected_model}" is not available' )
 
     if role == "user":
         ollama_messages = await build_ollama_history(storage, history)
@@ -257,10 +221,7 @@ async def add_message(
         ollama_messages.append(current_message)
 
         if ollama_client is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Ollama is not available",
-            )
+            raise HTTPException( status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Ollama is not available" )
 
     async def generate_events():
         stored_attachments: list[StoredAttachment] = []
