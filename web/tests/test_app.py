@@ -1,6 +1,6 @@
 import asyncio
 
-from L3M_Web.main import healthz
+from L3M_Web.api.routes.health import healthz
 
 
 def test_healthz() -> None:
