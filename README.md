@@ -177,6 +177,8 @@ There are two intentional places to extend the chat path. Choose the boundary ba
 | The `ai` service | Should apply to every compatible AI request, regardless of which UI or client sent it | `ai/src/l3m_ai/routes.py` |
 | The `web` service | Depends on users, chat history, uploads, database records, or browser-facing events | `web/src/L3M_Web/api/routes/chat.py` |
 
+These are recommended starting points, your needs may vary and support other changes.
+
 ### Option A: the AI processing layer
 
 Start in:
@@ -191,7 +193,7 @@ The `POST /api/chat` route validates the part of the Ollama chat contract that t
 AI PROCESSING EXTENSION POINT
 ```
 
-That block is the intended starting point for cross-cutting AI behavior, including:
+That block is the intended starting point for cross-cutting AI behavior, for example:
 
 - input or output guardrails
 - prompt or system-message injection
@@ -247,7 +249,7 @@ You do not need to understand every file before making a change. This is the pra
 
 ```text
 .
-├── compose.yaml                 # Defines and connects all five services
+├── compose.yaml                # Defines and connects all five services
 ├── sample.env                  # Documented environment-variable template
 ├── update_env.bat              # Windows environment-file updater
 ├── update_env.sh               # Bash environment-file updater
@@ -297,6 +299,8 @@ sample.env.local  -> .env.local
 sample.env.test   -> .env.test
 ```
 
+Both these scripts are functionally the same. They are provided for ease of setup on different systems.
+
 For each matching file, the updater:
 
 - creates the target file if it is missing
@@ -308,14 +312,22 @@ For each matching file, the updater:
 
 This makes pulling template changes easier: add a new setting to `sample.env`, run the updater, and the setting appears in each developer's `.env` without replacing their existing passwords or machine-specific paths.
 
+During development this provides an easy way to sync changes on different machines. Especially with multiple environment files. 
+Intended use is to regularly run the updater when committing changes and when pulling the project to a new machine. 
+This will highlight any variables in .env that need to be manually copied to sample.env and will highlight any new variables not yet in the local environment file.
+
+Multiple .env files are supported. Any file that starts with sample.env will be processed. This is not used in this template project but may be useful as complexity grows.
+
 > [!WARNING]
-> The updater rewrites target environment files directly and is intentionally interactive. Treat it as a development convenience, review its output, and do not use it as a production secret-management system.
+> The updater rewrites target environment files directly and is not interractive. It only provides feedback of changes. Treat it as a development convenience. Review its output and switch to manual sync when moving to production. It does ***not*** create a backup due to the risk of acccidentally creating a backup that is not in .gitignore and exposing privleged information.
 
 Whenever code starts depending on a new environment variable:
 
 1. Add a documented default or placeholder to the appropriate `sample.env*` file.
 2. Add it to the relevant Pydantic settings class.
-3. Pass it through `compose.yaml` if Compose needs to supply or interpolate it.
+3. Pass it through `compose.yaml` if Compose needs to supply or interpolate it. 
+    - By default the entire environment file is already passed to containers that need it. 
+    - Any additional environment variables in compose.yaml are constructed from the environment file.
 4. Run the environment updater and `docker compose config --quiet`.
 
 ### Make shortcuts
@@ -395,7 +407,7 @@ The sample model storage path is inside the repository:
 OLLAMA_MODEL_STORAGE="./.ollama_data"
 ```
 
-Point it at a stable external directory if several projects should share downloaded models. Model files can be large, so confirm the resolved path before moving or deleting the repository.
+Point it at a stable external directory if several projects should share downloaded models. Model files can be large, so confirm the resolved path before moving or deleting the repository. Consider that manual cleanup may be required for external files.
 
 `AI_PORT` is an internal service port by default. Compose exposes it to other containers but does not publish it to the host. The web service reaches it through `http://ai:8020`.
 
