@@ -529,7 +529,11 @@ Change the matching host-facing value in `.env`, such as `WEB_PORT` or `PHPMYADM
 
 > [!IMPORTANT]
 > ## Security considerations
-> Test
+> This is intended as a local only development prototype template. While many choices have been made to observe production ready practices there is no security implemented for transmission of data between containers or between the web frontend and the Docker container API endpoints. This is deliberate as many of the use cases do not require security. If security is a requirement you should implement security before implementing in production.
+>
+> - There is no passwords for users. Knowing a username is enough to load their chat history. This is usedful for pre-production demos.
+> - Data is transmitted between frontend and web server unencrypted.
+
 
 ## Before using this in production
 
@@ -552,7 +556,11 @@ Treat the template as the point where product development begins, not the point 
 
 1. Run the quickstart unchanged and send one successful message.
 2. Read the request flow and choose either the AI or web extension point.
-3. Add one small rule—for example, prepend a system message or reject an unsupported attachment.
+3. Add one small processing example eg:
+    - Prepend a system message
+    - Reject an unsupported attachment.
+    - Limit the message history to a maximum context size.
+    - Dynamically load additional supporting data to the system prompt
 4. Add a focused test for that rule.
 5. Add any new configuration to `sample.env` and run the environment updater.
 6. Rebuild only the service you changed and confirm its health and logs.
