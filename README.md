@@ -527,6 +527,10 @@ docker compose up --build --detach
 
 Change the matching host-facing value in `.env`, such as `WEB_PORT` or `PHPMYADMIN_PORT`, then recreate the affected service. Do not change internal service URLs unless you also change the service's listening port.
 
+> [!IMPORTANT]
+> ## Security considerations
+> Test
+
 ## Before using this in production
 
 This repository uses several production-friendly patterns, but it is not production hardened. A real deployment will normally need decisions and implementation for:
