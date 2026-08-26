@@ -8,18 +8,26 @@ The project is **production-shaped**, so configuration, lifecycle management, pe
 
 ## What you get
 
-- A browser-based chat interface with streamed responses and image file uploads.
-- Browser includes model selection and user feedback of errors.
-- Persistent chats and messages in MySQL.
-- Persistent users, created automatically by name.
-- Image attachments stored in a Docker volume.
+- Browser-based chat interface with streamed responses and image file uploads.
+    - Browser includes model selection and user feedback of errors.
+    - Web chat includes most common styling support.
+    - Persistent chats and messages in MySQL.
+    - Persistent users, created automatically by name.
+    - Image attachments stored in a Docker volume.
 - Ollama for running models locally.
+    - Easy switching between CPU and GPU compute.
 - A transparent AI processing layer between the web app and Ollama
-- phpMyAdmin for inspecting the development database
+    - Commented starting points for additional processing.
+- Modular framework for easy extension
+- Auto generated MySQL database structure
+    - phpMyAdmin for inspecting the development database
 - Environment-file update scripts for Windows and Bash
-- Container health checks, graceful startup and shutdown, and automatic restarts
-- Reproducible Python dependencies with `uv` and checked-in lockfiles
-- Backend tests in disposable Docker build stages, plus browser JavaScript tests
+    - Includes sample.env with sensible defaults
+    - Update scripts sync sample while preserving existing settings.
+- A balance between a production style frameworks and a simple development template
+    - Container health checks, graceful startup and shutdown, and automatic restarts
+    - Reproducible Python dependencies with `uv` and checked-in lockfiles
+    - Backend tests in disposable Docker build stages, plus browser JavaScript tests
 
 ## The five services
 
@@ -114,7 +122,7 @@ MYSQL_ROOT_PASSWORD=choose-a-different-root-password
 
 Do not commit `.env`. It is ignored by Git because it can contain machine-specific values and secrets.
 
-If you run the updater in the future it will sync any new values from sample.env while preserving the contents of .env
+If you run the updater in the future it will sync any new values from sample.env while preserving the contents of .env.
 
 ### 2. Start the stack
 
@@ -135,11 +143,13 @@ Press `Ctrl+C` to stop following logs; the containers keep running.
 
 Ollama starts without downloading a model automatically. Pull the model selected by `OLLAMA_MODEL`:
 
+This project was prototyped with ***gemma3:1b***. This is text only but very small. It was also prototyped with ***gemma3:4b*** which includes vision support.
+
 ```bash
 docker compose exec ollama sh -c 'ollama pull "$OLLAMA_MODEL"'
 ```
 
-The web service takes a snapshot of installed models when it starts. Restart it after adding or removing models:
+The environment ***OLLAMA_MODEL=gemma3:4b*** model configuration is the default model only. The web service gets a list of all available models from ollama when it starts. Restart it after adding or removing models:
 
 ```bash
 docker compose restart web
