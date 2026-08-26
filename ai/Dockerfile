@@ -13,7 +13,7 @@ RUN uv sync --frozen --no-dev
 FROM builder AS test
 RUN uv sync --frozen
 COPY tests ./tests
-RUN pytest
+RUN /app/.venv/bin/python -m pytest
 
 FROM python:3.14-slim AS runtime
 ENV PATH="/app/.venv/bin:$PATH" \
