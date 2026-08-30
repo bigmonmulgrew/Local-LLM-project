@@ -223,7 +223,7 @@ test("a failed stream removes provisional messages and preserves the draft", asy
     );
 });
 
-test("unsupported draft files are rejected before submission", () => {
+test("priority-one text files are accepted and unsupported files are rejected", () => {
     const statuses = [];
     const { storage } = createStorage();
     const controller = createChatController({
@@ -236,14 +236,18 @@ test("unsupported draft files are rejected before submission", () => {
 
     controller.addDraftAttachments([
         new File(["text"], "notes.txt", { type: "text/plain" }),
-        new File(["image"], "photo.jpg", { type: "image/jpeg" })
+        new File(["print('hello')"], "example.py"),
+        new File(["a,b\n1,2"], "table.csv", { type: "text/csv" }),
+        new File(["image"], "photo.jpg", { type: "image/jpeg" }),
+        new File(["pdf"], "document.pdf", { type: "application/pdf" }),
+        new File(["SECRET=value"], ".env", { type: "text/plain" })
     ]);
 
     assert.deepEqual(
         controller.getState().draftAttachments.map((file) => file.name),
-        ["photo.jpg"]
+        ["notes.txt", "example.py", "table.csv", "photo.jpg"]
     );
-    assert.match(statuses.at(-1)[1], /JPEG, PNG and WebP/);
+    assert.match(statuses.at(-1)[1], /supported images, text, data/);
 });
 
 test("keyboard and model preferences are validated and persisted", () => {

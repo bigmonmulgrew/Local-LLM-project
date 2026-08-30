@@ -10,6 +10,19 @@ from L3M_Web.api.services.attachment_storage import (
     AttachmentError,
     AttachmentStorage,
 )
+from L3M_Web.api.routes.chat import build_ollama_history
+from L3M_Web.domain.attachments import ConversationMessage
+
+
+SUPPORTED_TEXT_EXTENSIONS = (
+    ".txt", ".md", ".log",
+    ".json", ".yaml", ".yml", ".xml", ".toml", ".ini", ".cfg",
+    ".csv", ".tsv",
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".scss",
+    ".java", ".c", ".h", ".cpp", ".hpp", ".cs", ".go", ".rs",
+    ".php", ".rb", ".swift", ".kt", ".kts", ".sql",
+    ".sh", ".bash", ".ps1", ".bat",
+)
 
 
 class FakeUpload:
@@ -61,7 +74,7 @@ class AttachmentStorageTests(unittest.IsolatedAsyncioTestCase):
         stored_path = self.root / stored[0].storage_path
         self.assertEqual(stored_path.read_bytes(), image_bytes)
         self.assertEqual(
-            await self.storage.encode_stored(stored),
+            await self.storage.encode_stored_images(stored),
             [base64.b64encode(image_bytes).decode("ascii")],
         )
 
@@ -106,6 +119,107 @@ class AttachmentStorageTests(unittest.IsolatedAsyncioTestCase):
                 max_total_bytes=24,
             )
         self.assertEqual(error.exception.status_code, 413)
+
+    async def test_priority_one_text_extensions_are_supported(self) -> None:
+        for extension in SUPPORTED_TEXT_EXTENSIONS:
+            with self.subTest(extension=extension):
+                upload = FakeUpload(
+                    b"example UTF-8 content\n",
+                    filename=f"example{extension}",
+                    content_type="",
+                )
+                pending = await self.storage.prepare_uploads(
+                    [upload],
+                    max_files=5,
+                    max_file_bytes=1024,
+                    max_total_bytes=2048,
+                )
+                self.assertTrue(upload.closed)
+                self.assertTrue(pending[0].stored_name.endswith(extension))
+
+    async def test_text_is_stored_and_rendered_for_ollama(self) -> None:
+        upload = FakeUpload(
+            "Résumé notes\n- first item".encode(),
+            filename="notes.md",
+            content_type="text/markdown",
+        )
+        pending = await self.storage.prepare_uploads(
+            [upload],
+            max_files=5,
+            max_file_bytes=1024,
+            max_total_bytes=2048,
+        )
+
+        rendered_pending = self.storage.render_pending_text(pending)
+        self.assertIn("BEGIN ATTACHED FILE: notes.md", rendered_pending)
+        self.assertIn("Résumé notes", rendered_pending)
+        self.assertEqual(await self.storage.encode_pending_images(pending), [])
+
+        stored = await self.storage.persist(str(uuid4()), str(uuid4()), pending)
+        self.assertEqual(
+            await self.storage.render_stored_text(stored),
+            rendered_pending,
+        )
+        self.assertEqual(await self.storage.encode_stored_images(stored), [])
+
+    async def test_history_replays_text_and_images_in_their_ollama_fields(self) -> None:
+        image_bytes = b"\x89PNG\r\n\x1a\n" + b"image"
+        uploads = [
+            FakeUpload(
+                b"const answer = 42;",
+                filename="answer.js",
+                content_type="text/javascript",
+            ),
+            FakeUpload(
+                image_bytes,
+                filename="diagram.png",
+                content_type="image/png",
+            ),
+        ]
+        pending = await self.storage.prepare_uploads(
+            uploads,
+            max_files=5,
+            max_file_bytes=1024,
+            max_total_bytes=2048,
+        )
+        stored = await self.storage.persist(str(uuid4()), str(uuid4()), pending)
+
+        messages = await build_ollama_history(
+            self.storage,
+            [ConversationMessage(
+                role="user",
+                content="Explain these files",
+                attachments=tuple(stored),
+            )],
+        )
+
+        self.assertIn("Explain these files", messages[0]["content"])
+        self.assertIn("BEGIN ATTACHED FILE: answer.js", messages[0]["content"])
+        self.assertIn("const answer = 42;", messages[0]["content"])
+        self.assertEqual(
+            messages[0]["images"],
+            [base64.b64encode(image_bytes).decode("ascii")],
+        )
+
+    async def test_invalid_text_and_unsupported_extensions_are_rejected(self) -> None:
+        invalid_uploads = (
+            FakeUpload(b"\xff\xfe", filename="invalid.txt", content_type="text/plain"),
+            FakeUpload(b"text\x00binary", filename="binary.txt", content_type="text/plain"),
+            FakeUpload(b"%PDF-1.7", filename="document.pdf", content_type="application/pdf"),
+            FakeUpload(b"SECRET=value", filename=".env", content_type="text/plain"),
+        )
+
+        for upload in invalid_uploads:
+            with self.subTest(filename=upload.filename):
+                with self.assertRaises(AttachmentError) as error:
+                    await self.storage.prepare_uploads(
+                        [upload],
+                        max_files=5,
+                        max_file_bytes=1024,
+                        max_total_bytes=2048,
+                    )
+                self.assertEqual(error.exception.status_code, 415)
+                self.assertTrue(upload.closed)
 
 
 if __name__ == "__main__":
