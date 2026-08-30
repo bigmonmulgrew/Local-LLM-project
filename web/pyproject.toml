@@ -26,7 +26,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "src/L3M_Web/tests"]
 addopts = "-q"
 
 [tool.uv.build-backend]
