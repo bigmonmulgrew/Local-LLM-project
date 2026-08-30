@@ -91,11 +91,34 @@ const USERNAME_STORAGE_KEY = "l3m-chat-username";
 const LEGACY_CHAT_STORAGE_KEY = "l3m-chat-prototype-v1";
 const ENTER_TO_SEND_STORAGE_KEY = "l3m-enter-to-send";
 const MODEL_STORAGE_KEY = "l3m-selected-model";
-const ALLOWED_ATTACHMENT_TYPES = new Set([
+const ALLOWED_IMAGE_TYPES = new Set([
     "image/jpeg",
     "image/png",
     "image/webp"
 ]);
+const ALLOWED_IMAGE_EXTENSIONS = new Set([
+    ".jpg", ".jpeg", ".png", ".webp"
+]);
+const ALLOWED_TEXT_EXTENSIONS = new Set([
+    ".txt", ".md", ".log",
+    ".json", ".yaml", ".yml", ".xml", ".toml", ".ini", ".cfg",
+    ".csv", ".tsv",
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".scss",
+    ".java", ".c", ".h", ".cpp", ".hpp", ".cs", ".go", ".rs",
+    ".php", ".rb", ".swift", ".kt", ".kts", ".sql",
+    ".sh", ".bash", ".ps1", ".bat"
+]);
+
+/** @param {File} file @returns {boolean} */
+function isAllowedAttachment(file) {
+    const name = String(file.name || "").toLowerCase();
+    const dotIndex = name.lastIndexOf(".");
+    const extension = dotIndex >= 0 ? name.slice(dotIndex) : "";
+    return (
+        ALLOWED_IMAGE_TYPES.has(file.type)
+        && ALLOWED_IMAGE_EXTENSIONS.has(extension)
+    ) || ALLOWED_TEXT_EXTENSIONS.has(extension);
+}
 
 /** @returns {void} */
 function noOperation() {}
@@ -523,7 +546,7 @@ export function createChatController({
             const selectedModel = state.selectedModel;
             state.pendingExchange = {
                 chatId: targetChatId,
-                userContent: content || "Attached images",
+                userContent: content || "Attached files",
                 attachments: submittedFiles,
                 assistantContent: "",
                 startedAt: new Date().toISOString()
@@ -629,16 +652,16 @@ export function createChatController({
     function addDraftAttachments(files) {
         const selectedFiles = Array.from(files);
         const allowedFiles = selectedFiles.filter(
-            (file) => ALLOWED_ATTACHMENT_TYPES.has(file.type)
+            (file) => isAllowedAttachment(file)
         );
         const rejectedFiles = selectedFiles.filter(
-            (file) => !ALLOWED_ATTACHMENT_TYPES.has(file.type)
+            (file) => !isAllowedAttachment(file)
         );
         state.draftAttachments.push(...allowedFiles);
         if (rejectedFiles.length) {
             publishStatus(
                 "error",
-                "Only JPEG, PNG and WebP images can be attached"
+                "Only supported images, text, data and source-code files can be attached"
             );
         }
         publishState();
