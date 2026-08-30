@@ -135,7 +135,7 @@ button, label[for="file-input"] { -webkit-tap-highlight-color: transparent; }
 
 .messages {
     min-height: 0; overflow-y: auto; padding: 44px max(24px, calc((100% - 850px) / 2)) 28px;
-    scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: #394151 transparent;
+    overflow-anchor: none; scrollbar-width: thin; scrollbar-color: #394151 transparent;
 }
 .welcome {
     display: grid; place-items: center; max-width: 500px; min-height: 100%; margin: auto; padding: 40px 20px; text-align: center;

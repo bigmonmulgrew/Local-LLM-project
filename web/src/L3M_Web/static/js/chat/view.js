@@ -78,6 +78,8 @@ const ELEMENT_SELECTORS = Object.freeze({
     apiStatusContainer: "[data-api-status-wrap]"
 });
 
+const SCROLL_BOTTOM_THRESHOLD = 24;
+
 /**
  * Fail during initialization instead of producing a later, ambiguous null
  * reference when the template and JavaScript selectors drift apart.
@@ -90,9 +92,7 @@ const ELEMENT_SELECTORS = Object.freeze({
 function findRequiredElement(rootDocument, name, selector) {
     const element = rootDocument.querySelector(selector);
     if (!element) {
-        throw new Error(
-            `Chat view is missing required element "${name}" (${selector})`
-        );
+        throw new Error(`Chat view is missing required element "${name}" (${selector})`);
     }
     return element;
 }
@@ -117,13 +117,58 @@ function collectElements(rootDocument, app) {
  * @param {typeof requestAnimationFrame} [scheduleFrame]
  * @returns {Readonly<Object>|null}
  */
-export function createChatView(
-    rootDocument = globalThis.document,
-    scheduleFrame = globalThis.requestAnimationFrame
-) {
+export function createChatView(rootDocument = globalThis.document, scheduleFrame = globalThis.requestAnimationFrame ) {
     const app = rootDocument?.querySelector("[data-chat-app]");
     if (!app) return null;
     const elements = collectElements(rootDocument, app);
+    let shouldAutoScroll = true;
+    let scrollFrameScheduled = false;
+    let lastAutomaticScrollTop = null;
+
+    /** @returns {boolean} */
+    function isMessageHistoryAtBottom() {
+        const distanceFromBottom = elements.messageHistory.scrollHeight
+            - elements.messageHistory.clientHeight
+            - elements.messageHistory.scrollTop;
+        return distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD;
+    }
+
+    function updateAutoScrollPreference() {
+        const currentScrollTop = elements.messageHistory.scrollTop;
+        if (lastAutomaticScrollTop !== null && Math.abs(currentScrollTop - lastAutomaticScrollTop) <= 1) {
+            lastAutomaticScrollTop = null;
+            return;
+        }
+        lastAutomaticScrollTop = null;
+        shouldAutoScroll = isMessageHistoryAtBottom();
+    }
+
+    function captureAutoScrollPreference() {
+        const currentScrollTop = elements.messageHistory.scrollTop;
+
+        if (lastAutomaticScrollTop !== null && Math.abs(currentScrollTop - lastAutomaticScrollTop) <= 1) {
+            return;
+        }
+
+        lastAutomaticScrollTop = null;
+        shouldAutoScroll = isMessageHistoryAtBottom();
+    }
+
+    function scheduleScrollToBottom() {
+        if (!shouldAutoScroll || scrollFrameScheduled) return;
+
+        scrollFrameScheduled = true;
+
+        scheduleFrame(() => {
+            scrollFrameScheduled = false;
+            if (!shouldAutoScroll) return;
+
+            elements.messageHistory.scrollTop = elements.messageHistory.scrollHeight;
+            lastAutomaticScrollTop = elements.messageHistory.scrollTop;
+        });
+    }
+
+    elements.messageHistory.addEventListener("scroll", updateAutoScrollPreference);
 
     /** @param {string} status @param {string} message @returns {void} */
     function renderStatus(status, message) {
@@ -134,6 +179,7 @@ export function createChatView(
     /** @param {ChatViewState} state @returns {void} */
     function renderChatList(state) {
         elements.chatCount.textContent = String(state.chatSummaries.length);
+
         if (!state.chatSummaries.length) {
             elements.chatList.innerHTML = [
                 '<p class="chat-empty">',
@@ -152,9 +198,8 @@ export function createChatView(
             item.dataset.chatId = chat.id;
             item.tabIndex = 0;
             item.setAttribute("role", "button");
-            if (chat.id === state.selectedChat?.id) {
-                item.setAttribute("aria-current", "page");
-            }
+            
+            if (chat.id === state.selectedChat?.id) { item.setAttribute("aria-current", "page"); }
 
             item.innerHTML = [
                 '<span class="chat-list-copy">',
@@ -175,6 +220,11 @@ export function createChatView(
 
     /** @param {ChatViewState} state @returns {void} */
     function renderConversation(state) {
+        // Capture the user's position before replacing any message nodes. If a
+        // previous render already queued a bottom scroll, keep that preference
+        // through any additional stream updates received in the same frame.
+        if (!scrollFrameScheduled) captureAutoScrollPreference();
+
         const chat = state.selectedChat;
         const pendingMessages = state.pendingExchange
             && state.pendingExchange.chatId === chat?.id
@@ -212,15 +262,11 @@ export function createChatView(
             ].join("");
         } else {
             const messages = conversationMessages.map((message) => {
-                const article = rootDocument.createElement("article");
-                const isUser = message.role === "user";
-                const roleClass = isUser ? "user" : "assistant";
-                const author = isUser
-                    ? state.currentUser?.username || "User"
-                    : "L3M";
-                const avatar = isUser
-                    ? author.slice(0, 2).toUpperCase()
-                    : "L3";
+                const article     = rootDocument.createElement("article");
+                const isUser      = message.role === "user";
+                const roleClass   = isUser ? "user" : "assistant";
+                const author      = isUser ? state.currentUser?.username || "User" : "L3M";
+                const avatar      = isUser ? author.slice(0, 2).toUpperCase() : "L3";
                 const attachments = (message.attachments || [])
                     .map((file) => [
                         '<span class="message-file">📎 ',
@@ -230,10 +276,10 @@ export function createChatView(
                     .join("");
 
                 article.className = `message ${roleClass}${message.isStreaming ? " streaming" : ""}`;
-                const messageBody = message.isStreaming
-                    && !message.content
+                const messageBody = message.isStreaming && !message.content
                     ? '<span class="typing-indicator" aria-label="Generating response"><span></span><span></span><span></span></span>'
                     : formatMessage(message.content);
+
                 article.innerHTML = [
                     `<div class="message-avatar" aria-hidden="true">${escapeHtml(avatar)}</div>`,
                     "<div>",
@@ -242,9 +288,7 @@ export function createChatView(
                     `<time class="message-time" datetime="${escapeHtml(message.created_at)}">${shortTime(message.created_at)}</time>`,
                     "</div>",
                     `<div class="message-body">${messageBody}</div>`,
-                    attachments
-                        ? `<div class="message-attachments">${attachments}</div>`
-                        : "",
+                    attachments ? `<div class="message-attachments">${attachments}</div>` : "",
                     "</div>"
                 ].join("");
                 return article;
@@ -252,11 +296,9 @@ export function createChatView(
             elements.messageHistory.replaceChildren(...messages);
         }
 
-        // Rendering may change the history height. Scroll on the next frame so
-        // layout has incorporated the newly inserted message elements.
-        scheduleFrame(() => {
-            elements.messageHistory.scrollTop = elements.messageHistory.scrollHeight;
-        });
+        // Coalesce streamed updates into one scroll per frame. The scroll is
+        // cancelled if the user moves away from the bottom before it runs.
+        scheduleScrollToBottom();
     }
 
     /** @param {ChatViewState} state @returns {void} */
@@ -276,22 +318,12 @@ export function createChatView(
     /** @param {ChatViewState} state @returns {void} */
     function updateComposer(state) {
         elements.messageInput.style.height = "auto";
-        elements.messageInput.style.height = `${Math.min(
-            elements.messageInput.scrollHeight,
-            180
-        )}px`;
-        elements.sendButton.disabled = state.isSendingMessage
-            || (
-                !elements.messageInput.value.trim()
-                && state.draftAttachments.length === 0
-            );
-        elements.enterToggle.checked = state.enterToSend;
-        elements.formatHint.innerHTML = state.enterToSend
-            ? '<kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line'
-            : '<kbd>Shift</kbd> + <kbd>Enter</kbd> to send';
-        if (state.selectedModel) {
-            elements.modelSelect.value = state.selectedModel;
-        }
+        elements.messageInput.style.height = `${Math.min( elements.messageInput.scrollHeight, 180 )}px`;
+        elements.sendButton.disabled    = state.isSendingMessage || ( !elements.messageInput.value.trim() && state.draftAttachments.length === 0 );
+        elements.enterToggle.checked    = state.enterToSend;
+        elements.formatHint.innerHTML   = state.enterToSend ? '<kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line' : '<kbd>Shift</kbd> + <kbd>Enter</kbd> to send';
+        
+        if (state.selectedModel) { elements.modelSelect.value = state.selectedModel; }
     }
 
     /** @param {ChatViewState} state @returns {void} */
