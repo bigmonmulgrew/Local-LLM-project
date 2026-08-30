@@ -66,6 +66,12 @@ def attachment_http_exception(error: AttachmentError) -> HTTPException:
     return HTTPException(status_code=error.status_code, detail=str(error))
 
 
+def append_text_attachments(content: str, attachment_text: str) -> str:
+    if not attachment_text:
+        return content
+    return f"{content}\n\n{attachment_text}"
+
+
 async def prepare_attachments(
     storage: AttachmentStorage,
     files: list[UploadFile],
@@ -100,11 +106,16 @@ async def build_ollama_history( storage: AttachmentStorage, history: list[Conver
     messages: list[OllamaMessage] = []
     try:
         for message in history:
-            ollama_message = OllamaMessage( role=message.role, content=message.content )
+            attachment_text = await storage.render_stored_text(message.attachments)
+
+            ollama_message = OllamaMessage(
+                role=message.role,
+                content=append_text_attachments(message.content, attachment_text),
+            )
             if message.attachments:
-                ollama_message["images"] = await storage.encode_stored(
-                    message.attachments
-                )
+                images = await storage.encode_stored_images(message.attachments)
+                if images:
+                    ollama_message["images"] = images
             messages.append(ollama_message)
     except AttachmentError as exc:
         raise attachment_http_exception(exc) from exc
@@ -202,7 +213,7 @@ async def add_message(
     storage = AttachmentStorage(settings.upload_directory)
     pending_attachments = await prepare_attachments(storage, files, settings)
 
-    stored_content = text.strip() or "Attached images"
+    stored_content = text.strip() or "Attached files"
     selected_model = (model or settings.ollama_model).strip()
     permitted_models = set(ollama_models)
     if role == "user" and (
@@ -213,11 +224,15 @@ async def add_message(
 
     if role == "user":
         ollama_messages = await build_ollama_history(storage, history)
-        current_message = OllamaMessage(role="user", content=stored_content)
+        attachment_text = storage.render_pending_text(pending_attachments)
+        current_message = OllamaMessage(
+            role="user",
+            content=append_text_attachments(stored_content, attachment_text),
+        )
         if pending_attachments:
-            current_message["images"] = await storage.encode_pending(
-                pending_attachments
-            )
+            images = await storage.encode_pending_images(pending_attachments)
+            if images:
+                current_message["images"] = images
         ollama_messages.append(current_message)
 
         if ollama_client is None:
