@@ -8,12 +8,13 @@ The project is **production-shaped**, so configuration, lifecycle management, pe
 
 ## What you get
 
-- Browser-based chat interface with streamed responses and image file uploads.
+- Browser-based chat interface with streamed responses and file uploads.
     - Browser includes model selection and user feedback of errors.
     - Web chat includes most common styling support.
     - Persistent chats and messages in MySQL.
     - Persistent users, created automatically by name.
-    - Image attachments stored in a Docker volume.
+    - Image and UTF-8 text attachments stored in a Docker volume.
+    - Plain text, Markdown, logs, common structured-data formats and common source-code extensions are added to the model context automatically.
 - Ollama for running models locally.
     - Easy switching between CPU and GPU compute.
 - A transparent AI processing layer between the web app and Ollama
